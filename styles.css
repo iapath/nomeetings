@@ -56,6 +56,10 @@ ul { padding-left:18px; line-height:1.8; }
 .dashboard-account { display:flex; align-items:center; justify-content:flex-end; gap:12px; }
 .dashboard-account > div { display:grid; text-align:right; }
 .dashboard-account small { opacity:.55; }
+.profile-control { display:flex; align-items:center; gap:10px; padding:5px 10px 5px 5px; border:1px solid rgba(127,127,127,.2); border-radius:999px; color:inherit; background:rgba(255,255,255,.05); }
+.profile-control > span:last-child { display:grid; text-align:left; }
+.profile-control img,.avatar-fallback,.row-avatar,.row-avatar-fallback { width:38px; height:38px; border-radius:50%; object-fit:cover; }
+.avatar-fallback,.row-avatar-fallback { display:grid; place-items:center; background:var(--red); color:white; font-weight:850; }
 .dashboard-hero { display:flex; align-items:end; justify-content:space-between; gap:32px; padding:68px 0 46px; }
 .dashboard-hero h1 { font-size:clamp(3.2rem,7vw,6.4rem); max-width:980px; }
 .dashboard-hero .lede { max-width:760px; }
@@ -134,11 +138,16 @@ button:disabled { cursor:wait; opacity:.58; }
 .text-response { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:end; gap:10px; margin-top:12px; }
 .entry-list .workspace-row { grid-template-columns:130px minmax(0,1fr) auto; }
 .entry-kind { color:var(--red); text-transform:uppercase; font-size:.72rem; font-weight:850; letter-spacing:.08em; }
+.identity-line { display:flex; align-items:center; gap:10px; margin-bottom:6px; }
+.identity-line h4 { margin:0; }
+.row-avatar,.row-avatar-fallback { width:34px; height:34px; flex:0 0 auto; }
 .entry-media { width:100%; margin-top:8px; }
 .loading-row { opacity:.58; }
 .response-prompt { padding:28px; }
 .response-prompt p { opacity:.7; line-height:1.5; }
 .prompt-actions { display:flex; flex-wrap:wrap; gap:10px; margin-top:22px; }
+.profile-editor-avatar { width:104px; height:104px; margin:0 auto 20px; border-radius:50%; overflow:hidden; background:var(--red); color:white; display:grid; place-items:center; font-size:2.3rem; font-weight:900; }
+.profile-editor-avatar img { width:100%; height:100%; object-fit:cover; }
 
 @media (max-width:900px) {
   .dashboard-hero { display:grid; align-items:start; }

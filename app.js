@@ -71,6 +71,15 @@ const stopRecordingButton = document.querySelector('#stopRecordingButton');
 const uploadProgress = document.querySelector('#uploadProgress');
 const uploadProgressBar = document.querySelector('#uploadProgressBar');
 const responsePromptDialog = document.querySelector('#responsePromptDialog');
+const dashboardAvatar = document.querySelector('#dashboardAvatar');
+const dashboardAvatarFallback = document.querySelector('#dashboardAvatarFallback');
+const profileDialog = document.querySelector('#profileDialog');
+const profileForm = document.querySelector('#profileForm');
+const profileAvatarInput = document.querySelector('#profileAvatarInput');
+const profileAvatarPreview = document.querySelector('#profileAvatarPreview');
+const profileAvatarFallback = document.querySelector('#profileAvatarFallback');
+const profileMessage = document.querySelector('#profileMessage');
+const saveProfileButton = document.querySelector('#saveProfileButton');
 
 const dashboardState = {
   user: null,
@@ -85,6 +94,7 @@ const dashboardState = {
   recorder: null,
   recordingStream: null,
   recordingChunks: [],
+  profile: null,
 };
 
 function escapeHTML(value = '') {
@@ -96,6 +106,38 @@ function escapeHTML(value = '') {
 function formatDate(value, fallback = 'No deadline') {
   if (!value) return fallback;
   return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value));
+}
+
+function profileInitial(profile) {
+  return (profile?.display_name || profile?.email || 'M').trim().charAt(0).toUpperCase();
+}
+
+function avatarMarkup(profile) {
+  return profile?.avatar_url
+    ? `<img class="row-avatar" src="${escapeHTML(profile.avatar_url)}" alt="" />`
+    : `<span class="row-avatar-fallback">${escapeHTML(profileInitial(profile))}</span>`;
+}
+
+function renderAccountProfile() {
+  const profile = dashboardState.profile;
+  dashboardUser.textContent = profile?.display_name || dashboardState.user?.email?.split('@')[0] || 'Member';
+  dashboardEmail.textContent = profile?.email || dashboardState.user?.email || '';
+  const initial = profileInitial(profile);
+  dashboardAvatarFallback.textContent = initial;
+  profileAvatarFallback.textContent = initial;
+  if (profile?.avatar_url) {
+    dashboardAvatar.src = profile.avatar_url;
+    dashboardAvatar.hidden = false;
+    dashboardAvatarFallback.hidden = true;
+    profileAvatarPreview.src = profile.avatar_url;
+    profileAvatarPreview.hidden = false;
+    profileAvatarFallback.hidden = true;
+  } else {
+    dashboardAvatar.hidden = true;
+    dashboardAvatarFallback.hidden = false;
+    profileAvatarPreview.hidden = true;
+    profileAvatarFallback.hidden = false;
+  }
 }
 
 function setUploadProgress(message, percent = null, indeterminate = false) {
@@ -220,9 +262,13 @@ async function loadConversations() {
 
 async function loadDashboard(user) {
   dashboardState.user = user;
-  dashboardUser.textContent = user.user_metadata?.display_name || user.email?.split('@')[0] || 'Member';
-  dashboardEmail.textContent = user.email || '';
   dashboardStatus.textContent = 'Preparing your workspace…';
+
+  const { data: profile, error: profileError } = await supabase
+    .from('profiles').select('id,email,display_name,avatar_url').eq('id', user.id).single();
+  if (profileError) throw profileError;
+  dashboardState.profile = profile;
+  renderAccountProfile();
 
   const { data, error } = await supabase.rpc('ensure_user_workspace');
   if (error) {
@@ -264,7 +310,7 @@ function renderConversationWorkspace() {
 
   const participantRows = dashboardState.participants.map((participant) => `
     <article class="workspace-row">
-      <div><h4>${escapeHTML(participant.profiles?.display_name || participant.profiles?.email || 'Participant')}</h4><p>${escapeHTML(participant.profiles?.email || '')}</p></div>
+      <div><div class="identity-line">${avatarMarkup(participant.profiles)}<div><h4>${escapeHTML(participant.profiles?.display_name || participant.profiles?.email || 'Participant')}</h4><p>${escapeHTML(participant.profiles?.email || '')}</p></div></div></div>
       <div class="workspace-row-meta"><span class="pill">${escapeHTML(participant.role)}</span><span class="pill ${participant.response_required ? 'required' : ''}">${participant.response_required ? escapeHTML(participant.response_status) : 'No response required'}</span></div>
     </article>`);
   const inviteRows = dashboardState.invites.filter((invite) => !invite.accepted_at).map((invite) => `
@@ -277,7 +323,7 @@ function renderConversationWorkspace() {
   workspaceEntries.innerHTML = dashboardState.entries.length ? dashboardState.entries.map((entry) => `
     <article class="workspace-row">
       <span class="entry-kind">${escapeHTML(entry.kind)}</span>
-      <div><h4>${escapeHTML(entry.profiles?.display_name || entry.profiles?.email || 'Participant')}</h4>${entry.text_body ? `<p>${escapeHTML(entry.text_body)}</p>` : `<p>${entry.status === 'ready' ? 'Clip uploaded and ready.' : escapeHTML(entry.status)}</p>`}${entry.media_url ? `<${entry.kind === 'audio' ? 'audio' : 'video'} class="entry-media" controls data-entry-media="${entry.id}" src="${escapeHTML(entry.media_url)}"></${entry.kind === 'audio' ? 'audio' : 'video'}>` : ''}</div>
+      <div><div class="identity-line">${avatarMarkup(entry.profiles)}<h4>${escapeHTML(entry.profiles?.display_name || entry.profiles?.email || 'Participant')}</h4></div>${entry.text_body ? `<p>${escapeHTML(entry.text_body)}</p>` : `<p>${entry.status === 'ready' ? 'Clip uploaded and ready.' : escapeHTML(entry.status)}</p>`}${entry.media_url ? `<${entry.kind === 'audio' ? 'audio' : 'video'} class="entry-media" controls data-entry-media="${entry.id}" src="${escapeHTML(entry.media_url)}"></${entry.kind === 'audio' ? 'audio' : 'video'}>` : ''}</div>
       <div class="workspace-row-meta"><span>${escapeHTML(formatDate(entry.created_at))}</span></div>
     </article>`).join('') : '<div class="empty-inline">No responses yet. Upload a clip, record one, or write an update.</div>';
 
@@ -295,9 +341,9 @@ async function loadConversationWorkspace() {
   workspaceMessage.textContent = 'Loading agenda, participants, and responses…';
   const [agendaResult, participantResult, inviteResult, entryResult] = await Promise.all([
     supabase.from('agenda_items').select('*').eq('conversation_id', conversationId).order('position'),
-    supabase.from('conversation_participants').select('user_id,role,response_required,response_status,created_at,profiles!conversation_participants_user_id_fkey(email,display_name)').eq('conversation_id', conversationId).order('created_at'),
+    supabase.from('conversation_participants').select('user_id,role,response_required,response_status,created_at,profiles!conversation_participants_user_id_fkey(email,display_name,avatar_url)').eq('conversation_id', conversationId).order('created_at'),
     supabase.from('conversation_invites').select('id,email,role,response_required,accepted_at,created_at').eq('conversation_id', conversationId).order('created_at'),
-    supabase.from('conversation_entries').select('id,author_id,kind,status,storage_bucket,storage_path,text_body,duration_seconds,size_bytes,created_at,profiles!conversation_entries_author_id_fkey(email,display_name)').eq('conversation_id', conversationId).order('created_at', { ascending: true }),
+    supabase.from('conversation_entries').select('id,author_id,kind,status,storage_bucket,storage_path,text_body,duration_seconds,size_bytes,created_at,profiles!conversation_entries_author_id_fkey(email,display_name,avatar_url)').eq('conversation_id', conversationId).order('created_at', { ascending: true }),
   ]);
   const error = agendaResult.error || participantResult.error || inviteResult.error || entryResult.error;
   if (error) throw error;
@@ -499,6 +545,65 @@ emailForm.addEventListener('submit', async (event) => {
 });
 
 dashboardThemeToggle.addEventListener('click', () => setTheme(!app.classList.contains('dark')));
+document.querySelector('#openProfileDialog').addEventListener('click', () => {
+  document.querySelector('#profileDisplayName').value = dashboardState.profile?.display_name || '';
+  profileAvatarInput.value = '';
+  profileMessage.textContent = '';
+  renderAccountProfile();
+  profileDialog.showModal();
+});
+document.querySelector('#closeProfileDialog').addEventListener('click', () => profileDialog.close());
+document.querySelector('#cancelProfileDialog').addEventListener('click', () => profileDialog.close());
+profileAvatarInput.addEventListener('change', () => {
+  const file = profileAvatarInput.files?.[0];
+  if (!file) return;
+  if (file.size > 5 * 1024 * 1024) {
+    profileMessage.textContent = 'Choose an image smaller than 5 MB.';
+    profileAvatarInput.value = '';
+    return;
+  }
+  profileAvatarPreview.src = URL.createObjectURL(file);
+  profileAvatarPreview.hidden = false;
+  profileAvatarFallback.hidden = true;
+});
+profileForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  if (!profileForm.reportValidity() || !dashboardState.user) return;
+  saveProfileButton.disabled = true;
+  saveProfileButton.textContent = 'Saving…';
+  profileMessage.textContent = 'Saving your profile…';
+  try {
+    const displayName = document.querySelector('#profileDisplayName').value.trim();
+    const file = profileAvatarInput.files?.[0];
+    let avatarUrl = dashboardState.profile?.avatar_url || null;
+    if (file) {
+      const extension = file.name.split('.').pop()?.toLowerCase() || 'jpg';
+      const path = `${dashboardState.user.id}/${crypto.randomUUID()}.${extension}`;
+      const { error: uploadError } = await supabase.storage.from('avatars').upload(path, file, {
+        contentType: file.type,
+        cacheControl: '3600',
+      });
+      if (uploadError) throw uploadError;
+      avatarUrl = supabase.storage.from('avatars').getPublicUrl(path).data.publicUrl;
+    }
+
+    const { data: profile, error: updateError } = await supabase.from('profiles')
+      .update({ display_name: displayName, avatar_url: avatarUrl, updated_at: new Date().toISOString() })
+      .eq('id', dashboardState.user.id)
+      .select('id,email,display_name,avatar_url').single();
+    if (updateError) throw updateError;
+    await supabase.auth.updateUser({ data: { display_name: displayName, avatar_url: avatarUrl } });
+    dashboardState.profile = profile;
+    renderAccountProfile();
+    if (dashboardState.currentConversation) await loadConversationWorkspace();
+    profileDialog.close();
+  } catch (error) {
+    profileMessage.textContent = `Could not save profile: ${error.message}`;
+  } finally {
+    saveProfileButton.disabled = false;
+    saveProfileButton.textContent = 'Save profile';
+  }
+});
 signOutButton.addEventListener('click', async () => {
   dashboardStatus.textContent = 'Signing out…';
   await supabase.auth.signOut();

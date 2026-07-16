@@ -80,7 +80,11 @@
       <nav class="dashboard-nav">
         <div class="brand"><div class="ban-logo"><span></span></div><strong>NoMeetings</strong></div>
         <div class="dashboard-account">
-          <div><strong id="dashboardUser">Member</strong><small id="dashboardEmail"></small></div>
+          <button class="profile-control" id="openProfileDialog" type="button" aria-label="Edit profile">
+            <img id="dashboardAvatar" alt="" hidden />
+            <span class="avatar-fallback" id="dashboardAvatarFallback">M</span>
+            <span><strong id="dashboardUser">Member</strong><small id="dashboardEmail"></small></span>
+          </button>
           <button class="toggle" id="dashboardThemeToggle" type="button">Light mode</button>
           <button class="ghost" id="signOutButton" type="button">Sign out</button>
         </div>
@@ -200,6 +204,17 @@
         <button class="ghost" id="promptUpload" type="button">Upload video or audio</button>
         <button class="ghost" id="promptText" type="button">Write a response</button>
       </div>
+    </dialog>
+
+    <dialog class="conversation-dialog profile-dialog" id="profileDialog">
+      <form id="profileForm">
+        <div class="dialog-heading"><div><p class="eyebrow">Your profile</p><h2>How should people see you?</h2></div><button class="icon-button" id="closeProfileDialog" type="button" aria-label="Close">×</button></div>
+        <div class="profile-editor-avatar"><img id="profileAvatarPreview" alt="Profile preview" hidden /><span id="profileAvatarFallback">M</span></div>
+        <label>Profile photo<input id="profileAvatarInput" type="file" accept="image/jpeg,image/png,image/webp,image/gif" /></label>
+        <label>Your name<input id="profileDisplayName" maxlength="80" placeholder="Chris Stanley" required /></label>
+        <p class="form-message" id="profileMessage" aria-live="polite"></p>
+        <div class="dialog-actions"><button class="ghost" id="cancelProfileDialog" type="button">Cancel</button><button class="primary" id="saveProfileButton" type="submit">Save profile</button></div>
+      </form>
     </dialog>
   </main>
   <script type="module" src="app.js"></script>
