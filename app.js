@@ -336,6 +336,7 @@ async function uploadConversationClip(file, forcedKind) {
   if (!file || !dashboardState.currentConversation) return;
   const conversation = dashboardState.currentConversation;
   const kind = forcedKind || (file.type.startsWith('audio/') ? 'audio' : 'video');
+  const contentType = (file.type || `${kind}/webm`).split(';')[0].trim();
   const extension = file.name?.split('.').pop() || (kind === 'audio' ? 'webm' : 'webm');
   const path = `${conversation.id}/${dashboardState.user.id}/${crypto.randomUUID()}.${extension}`;
   setUploadProgress(`Preparing ${file.name || `${kind} recording`}…`, 1);
@@ -353,7 +354,7 @@ async function uploadConversationClip(file, forcedKind) {
       metadata: {
         bucketName: 'conversation-clips',
         objectName: path,
-        contentType: file.type || 'application/octet-stream',
+        contentType,
         cacheControl: '3600',
       },
       onError: reject,
