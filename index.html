@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NoMeetings — Async Conversations</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <main class="app dark" id="app">
+    <nav class="nav">
+      <div class="brand"><div class="ban-logo"><span></span></div><strong>NoMeetings</strong></div>
+      <div class="nav-actions">
+        <button>Demo workspace</button>
+        <button class="toggle" id="themeToggle">Light mode</button>
+      </div>
+    </nav>
+
+    <section class="hero">
+      <div class="hero-copy">
+        <p class="eyebrow">Async video • audio • text • screen share</p>
+        <h1>I have <span>NoMeetings</span> today. Do you?</h1>
+        <p class="lede">Hold one continuous Conversation, tag agenda moments live, and let each person watch only what matters before the deadline.</p>
+        <div class="hero-actions">
+          <button class="primary">Start a Conversation</button>
+          <button class="ghost">Upload a clip</button>
+        </div>
+        <div class="microcopy">10 minute max clips • Supabase Storage ready • email reminders at 8, 3, and 1 hour</div>
+      </div>
+      <div class="record-card">
+        <div class="record-top"><span><i class="live-dot"></i> Recording host update</span><b>07:16</b></div>
+        <div class="video-stage"><div><div class="ban-logo big"><span></span></div><p>Live life with No Meetings</p></div></div>
+        <div class="capture-row">
+          <button class="active">Camera</button><button>Audio</button><button>Screen</button><button>Text</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="workspace">
+      <aside class="panel checklist">
+        <div class="section-title"><span>Floating agenda</span><small>click while recording to timestamp</small></div>
+        <article class="agenda-item"><button class="timestamp">00:48</button><div><h3>Q4 Predictions</h3><p>Revenue model, product bets, and market risks.</p></div><span class="pill required">Required</span></article>
+        <article class="agenda-item"><button class="timestamp">03:12</button><div><h3>Monthly Numbers</h3><p>MRR, churn, pipeline, and blockers.</p></div><span class="pill required">Required</span></article>
+        <article class="agenda-item"><button class="timestamp">06:44</button><div><h3>Launch Tasks</h3><p>Watch if you own launch, content, or QA work.</p></div><span class="pill">Optional</span></article>
+        <article class="agenda-item"><button class="timestamp">08:25</button><div><h3>Open Questions</h3><p>Async follow-ups and text responses.</p></div><span class="pill">Skippable</span></article>
+      </aside>
+
+      <section class="panel conversation">
+        <div class="section-title"><span>Monthly numbers Conversation</span><small>3 new moments</small></div>
+        <div class="player">
+          <div class="player-window"><span>Kate's screen share auto-plays next</span></div>
+          <div class="progress"><span></span></div>
+          <div class="player-controls"><button>Skip optional</button><button class="primary small">Respond</button></div>
+        </div>
+        <div class="clips">
+          <div class="clip"><b>Maya</b><span>Host video</span><em>09:58</em><p>Tagged agenda moments while recording one continuous update.</p></div>
+          <div class="clip"><b>Kate</b><span>Screen share</span><em>04:20</em><strong>new</strong><p>Added launch board context and requested Judy review Q4 assumptions.</p></div>
+          <div class="clip"><b>John</b><span>Text response</span><em>01:10 read</em><strong>new</strong><p>Confirmed monthly numbers and marked two blockers as overdue.</p></div>
+        </div>
+      </section>
+
+      <aside class="panel summary">
+        <div class="section-title"><span>Summary doc</span><small>whole + sections</small></div>
+        <h3>What changed since you watched</h3>
+        <p>Kate added a screen share for launch tasks. John confirmed the numbers but marked procurement and QA as overdue.</p>
+        <h3>Required responses</h3>
+        <ul><li>Judy — Q4 Predictions</li><li>John — Monthly Numbers</li><li>Kate — Launch Tasks optional</li></ul>
+        <h3>Email reminders</h3>
+        <p>Due Friday 5:00 PM. Reminders queued for 8h, 3h, and 1h before deadline.</p>
+      </aside>
+    </section>
+  </main>
+  <script>
+    const app = document.getElementById('app');
+    const toggle = document.getElementById('themeToggle');
+    toggle.addEventListener('click', () => {
+      app.classList.toggle('dark');
+      app.classList.toggle('light');
+      toggle.textContent = app.classList.contains('dark') ? 'Light mode' : 'Dark mode';
+    });
+  </script>
+</body>
+</html>
