@@ -80,6 +80,11 @@ const profileAvatarPreview = document.querySelector('#profileAvatarPreview');
 const profileAvatarFallback = document.querySelector('#profileAvatarFallback');
 const profileMessage = document.querySelector('#profileMessage');
 const saveProfileButton = document.querySelector('#saveProfileButton');
+const profileVoiceSelect = document.querySelector('#profileVoiceSelect');
+const playNewButton = document.querySelector('#playNewButton');
+const playAllButton = document.querySelector('#playAllButton');
+const stopPlaybackButton = document.querySelector('#stopPlaybackButton');
+const playbackStatus = document.querySelector('#playbackStatus');
 
 const dashboardState = {
   user: null,
@@ -95,6 +100,11 @@ const dashboardState = {
   recordingStream: null,
   recordingChunks: [],
   profile: null,
+  watchProgress: new Map(),
+  autoplayActive: false,
+  playbackCancelled: false,
+  currentMedia: null,
+  playbackResolve: null,
 };
 
 function escapeHTML(value = '') {
@@ -139,6 +149,21 @@ function renderAccountProfile() {
     profileAvatarFallback.hidden = false;
   }
 }
+
+function loadVoiceOptions() {
+  if (!('speechSynthesis' in window)) {
+    profileVoiceSelect.innerHTML = '<option value="">Text-to-speech is unavailable on this device</option>';
+    profileVoiceSelect.disabled = true;
+    return;
+  }
+  const voices = speechSynthesis.getVoices().filter((voice) => voice.lang.toLowerCase().startsWith('en'));
+  const selected = dashboardState.profile?.tts_voice || '';
+  profileVoiceSelect.innerHTML = '<option value="">Default voice</option>' + voices.map((voice) =>
+    `<option value="${escapeHTML(voice.name)}">${escapeHTML(voice.name)} · ${escapeHTML(voice.lang)}</option>`).join('');
+  profileVoiceSelect.value = voices.some((voice) => voice.name === selected) ? selected : '';
+}
+
+if ('speechSynthesis' in window) speechSynthesis.addEventListener('voiceschanged', loadVoiceOptions);
 
 function setUploadProgress(message, percent = null, indeterminate = false) {
   workspaceMessage.textContent = message;
@@ -265,10 +290,11 @@ async function loadDashboard(user) {
   dashboardStatus.textContent = 'Preparing your workspace…';
 
   const { data: profile, error: profileError } = await supabase
-    .from('profiles').select('id,email,display_name,avatar_url').eq('id', user.id).single();
+    .from('profiles').select('id,email,display_name,avatar_url,tts_voice').eq('id', user.id).single();
   if (profileError) throw profileError;
   dashboardState.profile = profile;
   renderAccountProfile();
+  loadVoiceOptions();
 
   const { data, error } = await supabase.rpc('ensure_user_workspace');
   if (error) {
@@ -301,6 +327,8 @@ function renderConversationWorkspace() {
   document.querySelector('#agendaCount').textContent = `${dashboardState.agenda.length} item${dashboardState.agenda.length === 1 ? '' : 's'}`;
   document.querySelector('#participantCount').textContent = `${dashboardState.participants.length + dashboardState.invites.filter((invite) => !invite.accepted_at).length} people`;
   document.querySelector('#entryCount').textContent = `${dashboardState.entries.length} response${dashboardState.entries.length === 1 ? '' : 's'}`;
+  const newCount = dashboardState.entries.filter((entry) => !dashboardState.watchProgress.get(entry.id)?.completed).length;
+  playNewButton.textContent = `▶ Play new${newCount ? ` (${newCount})` : ''}`;
 
   workspaceAgenda.innerHTML = dashboardState.agenda.length ? dashboardState.agenda.map((item, index) => `
     <article class="workspace-row">
@@ -320,37 +348,142 @@ function renderConversationWorkspace() {
     </article>`);
   workspaceParticipants.innerHTML = [...participantRows, ...inviteRows].join('') || '<div class="empty-inline">Invite the people who need this update.</div>';
 
-  workspaceEntries.innerHTML = dashboardState.entries.length ? dashboardState.entries.map((entry) => `
-    <article class="workspace-row">
+  workspaceEntries.innerHTML = dashboardState.entries.length ? dashboardState.entries.map((entry, index) => `
+    <article class="workspace-row ${dashboardState.watchProgress.get(entry.id)?.completed ? 'watched' : ''}" data-entry-row="${entry.id}">
       <span class="entry-kind">${escapeHTML(entry.kind)}</span>
       <div><div class="identity-line">${avatarMarkup(entry.profiles)}<h4>${escapeHTML(entry.profiles?.display_name || entry.profiles?.email || 'Participant')}</h4></div>${entry.text_body ? `<p>${escapeHTML(entry.text_body)}</p>` : `<p>${entry.status === 'ready' ? 'Clip uploaded and ready.' : escapeHTML(entry.status)}</p>`}${entry.media_url ? `<${entry.kind === 'audio' ? 'audio' : 'video'} class="entry-media" controls data-entry-media="${entry.id}" src="${escapeHTML(entry.media_url)}"></${entry.kind === 'audio' ? 'audio' : 'video'}>` : ''}</div>
-      <div class="workspace-row-meta"><span>${escapeHTML(formatDate(entry.created_at))}</span></div>
+      <div class="workspace-row-meta"><span class="watch-state">${dashboardState.watchProgress.get(entry.id)?.completed ? '✓ Played' : 'New'}</span><span>${escapeHTML(formatDate(entry.created_at))}</span><button class="ghost play-from-entry" type="button" data-play-index="${index}">Play from here</button></div>
     </article>`).join('') : '<div class="empty-inline">No responses yet. Upload a clip, record one, or write an update.</div>';
 
-  workspaceEntries.querySelectorAll('video[data-entry-media]').forEach((video) => {
-    video.addEventListener('ended', () => {
+  workspaceEntries.querySelectorAll('[data-entry-media]').forEach((media) => {
+    media.addEventListener('ended', async () => {
       const participant = dashboardState.participants.find((item) => item.user_id === dashboardState.user.id);
-      const entry = dashboardState.entries.find((item) => item.id === video.dataset.entryMedia);
-      if (participant?.role !== 'host' && entry?.author_id !== dashboardState.user.id) responsePromptDialog.showModal();
+      const entry = dashboardState.entries.find((item) => item.id === media.dataset.entryMedia);
+      if (entry && !dashboardState.autoplayActive) await markEntryComplete(entry);
+      if (!dashboardState.autoplayActive && participant?.role !== 'host' && entry?.author_id !== dashboardState.user.id) responsePromptDialog.showModal();
     });
   });
+}
+
+async function markEntryComplete(entry) {
+  const progress = {
+    user_id: dashboardState.user.id,
+    entry_id: entry.id,
+    last_watched_seconds: entry.duration_seconds || 0,
+    completed: true,
+    skipped: false,
+    updated_at: new Date().toISOString(),
+  };
+  const { error } = await supabase.from('watch_progress').upsert(progress, { onConflict: 'user_id,entry_id' });
+  if (error) console.warn('Could not save playback progress', error);
+  dashboardState.watchProgress.set(entry.id, progress);
+  const row = workspaceEntries.querySelector(`[data-entry-row="${entry.id}"]`);
+  row?.classList.add('watched');
+  const state = row?.querySelector('.watch-state');
+  if (state) state.textContent = '✓ Played';
+}
+
+function stopContinuousPlayback(message = 'Playback stopped.') {
+  dashboardState.playbackCancelled = true;
+  dashboardState.currentMedia?.pause();
+  dashboardState.currentMedia = null;
+  if ('speechSynthesis' in window) speechSynthesis.cancel();
+  dashboardState.playbackResolve?.();
+  dashboardState.playbackResolve = null;
+  dashboardState.autoplayActive = false;
+  playNewButton.disabled = false;
+  playAllButton.disabled = false;
+  stopPlaybackButton.disabled = true;
+  playbackStatus.textContent = message;
+}
+
+function speakTextEntry(entry) {
+  return new Promise((resolve, reject) => {
+    if (!('speechSynthesis' in window)) {
+      reject(new Error('Text-to-speech is not available on this device.'));
+      return;
+    }
+    const utterance = new SpeechSynthesisUtterance(entry.text_body);
+    const voices = speechSynthesis.getVoices();
+    const preferred = voices.find((voice) => voice.name === entry.profiles?.tts_voice);
+    if (preferred) utterance.voice = preferred;
+    utterance.rate = 1;
+    utterance.onend = resolve;
+    utterance.onerror = (event) => event.error === 'canceled' ? resolve() : reject(new Error(`Text reader failed: ${event.error}`));
+    dashboardState.playbackResolve = resolve;
+    speechSynthesis.speak(utterance);
+  });
+}
+
+function playMediaEntry(entry) {
+  return new Promise(async (resolve, reject) => {
+    const media = workspaceEntries.querySelector(`[data-entry-media="${entry.id}"]`);
+    if (!media) {
+      reject(new Error('This recording is not available for playback.'));
+      return;
+    }
+    dashboardState.currentMedia = media;
+    dashboardState.playbackResolve = resolve;
+    const finish = () => { media.removeEventListener('ended', finish); media.removeEventListener('error', fail); resolve(); };
+    const fail = () => { media.removeEventListener('ended', finish); media.removeEventListener('error', fail); reject(new Error('This recording could not be played.')); };
+    media.addEventListener('ended', finish);
+    media.addEventListener('error', fail);
+    media.currentTime = 0;
+    try { await media.play(); } catch (error) { fail(); }
+  });
+}
+
+async function playConversationEntries(entries) {
+  if (!entries.length) {
+    playbackStatus.textContent = 'You are caught up—there is nothing new to play.';
+    return;
+  }
+  if (responsePromptDialog.open) responsePromptDialog.close();
+  dashboardState.playbackCancelled = false;
+  dashboardState.autoplayActive = true;
+  playNewButton.disabled = true;
+  playAllButton.disabled = true;
+  stopPlaybackButton.disabled = false;
+
+  try {
+    for (const entry of entries) {
+      if (dashboardState.playbackCancelled) break;
+      const author = entry.profiles?.display_name || entry.profiles?.email || 'Participant';
+      playbackStatus.textContent = entry.kind === 'text' ? `Reading ${author}'s response…` : `Playing ${author}'s ${entry.kind}…`;
+      workspaceEntries.querySelector(`[data-entry-row="${entry.id}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      if (entry.kind === 'text') await speakTextEntry(entry);
+      else await playMediaEntry(entry);
+      dashboardState.playbackResolve = null;
+      dashboardState.currentMedia = null;
+      if (!dashboardState.playbackCancelled) await markEntryComplete(entry);
+    }
+    if (!dashboardState.playbackCancelled) {
+      stopContinuousPlayback('Conversation complete. You are all caught up.');
+      const participant = dashboardState.participants.find((item) => item.user_id === dashboardState.user.id);
+      if (participant?.role !== 'host') responsePromptDialog.showModal();
+    }
+  } catch (error) {
+    stopContinuousPlayback(`Playback stopped: ${error.message}`);
+  }
 }
 
 async function loadConversationWorkspace() {
   const conversationId = dashboardState.currentConversation.id;
   workspaceMessage.textContent = 'Loading agenda, participants, and responses…';
-  const [agendaResult, participantResult, inviteResult, entryResult] = await Promise.all([
+  const [agendaResult, participantResult, inviteResult, entryResult, progressResult] = await Promise.all([
     supabase.from('agenda_items').select('*').eq('conversation_id', conversationId).order('position'),
-    supabase.from('conversation_participants').select('user_id,role,response_required,response_status,created_at,profiles!conversation_participants_user_id_fkey(email,display_name,avatar_url)').eq('conversation_id', conversationId).order('created_at'),
+    supabase.from('conversation_participants').select('user_id,role,response_required,response_status,created_at,profiles!conversation_participants_user_id_fkey(email,display_name,avatar_url,tts_voice)').eq('conversation_id', conversationId).order('created_at'),
     supabase.from('conversation_invites').select('id,email,role,response_required,accepted_at,created_at').eq('conversation_id', conversationId).order('created_at'),
-    supabase.from('conversation_entries').select('id,author_id,kind,status,storage_bucket,storage_path,text_body,duration_seconds,size_bytes,created_at,profiles!conversation_entries_author_id_fkey(email,display_name,avatar_url)').eq('conversation_id', conversationId).order('created_at', { ascending: true }),
+    supabase.from('conversation_entries').select('id,author_id,kind,status,storage_bucket,storage_path,text_body,duration_seconds,size_bytes,created_at,profiles!conversation_entries_author_id_fkey(email,display_name,avatar_url,tts_voice)').eq('conversation_id', conversationId).order('created_at', { ascending: true }),
+    supabase.from('watch_progress').select('entry_id,last_watched_seconds,completed,skipped,updated_at').eq('user_id', dashboardState.user.id),
   ]);
-  const error = agendaResult.error || participantResult.error || inviteResult.error || entryResult.error;
+  const error = agendaResult.error || participantResult.error || inviteResult.error || entryResult.error || progressResult.error;
   if (error) throw error;
   dashboardState.agenda = agendaResult.data || [];
   dashboardState.participants = participantResult.data || [];
   dashboardState.invites = inviteResult.data || [];
   dashboardState.entries = entryResult.data || [];
+  dashboardState.watchProgress = new Map((progressResult.data || []).map((progress) => [progress.entry_id, progress]));
 
   await Promise.all(dashboardState.entries.map(async (entry) => {
     if (!entry.storage_path || !entry.storage_bucket) return;
@@ -419,7 +552,7 @@ async function uploadConversationClip(file, forcedKind) {
   });
 
   setUploadProgress('Upload finished. Saving the response…', 100);
-  const { error: entryError } = await supabase.from('conversation_entries').insert({
+  const { data: savedEntry, error: entryError } = await supabase.from('conversation_entries').insert({
     conversation_id: conversation.id,
     author_id: dashboardState.user.id,
     kind,
@@ -427,11 +560,12 @@ async function uploadConversationClip(file, forcedKind) {
     storage_bucket: 'conversation-clips',
     storage_path: path,
     size_bytes: file.size,
-  });
+  }).select('id,duration_seconds').single();
   if (entryError) {
     await supabase.storage.from('conversation-clips').remove([path]);
     throw entryError;
   }
+  await markEntryComplete(savedEntry);
   await loadConversationWorkspace();
   setUploadProgress('Clip uploaded and ready.', 100);
 }
@@ -550,6 +684,7 @@ document.querySelector('#openProfileDialog').addEventListener('click', () => {
   profileAvatarInput.value = '';
   profileMessage.textContent = '';
   renderAccountProfile();
+  loadVoiceOptions();
   profileDialog.showModal();
 });
 document.querySelector('#closeProfileDialog').addEventListener('click', () => profileDialog.close());
@@ -574,6 +709,7 @@ profileForm.addEventListener('submit', async (event) => {
   profileMessage.textContent = 'Saving your profile…';
   try {
     const displayName = document.querySelector('#profileDisplayName').value.trim();
+    const ttsVoice = profileVoiceSelect.value || null;
     const file = profileAvatarInput.files?.[0];
     let avatarUrl = dashboardState.profile?.avatar_url || null;
     if (file) {
@@ -588,9 +724,9 @@ profileForm.addEventListener('submit', async (event) => {
     }
 
     const { data: profile, error: updateError } = await supabase.from('profiles')
-      .update({ display_name: displayName, avatar_url: avatarUrl, updated_at: new Date().toISOString() })
+      .update({ display_name: displayName, avatar_url: avatarUrl, tts_voice: ttsVoice, updated_at: new Date().toISOString() })
       .eq('id', dashboardState.user.id)
-      .select('id,email,display_name,avatar_url').single();
+      .select('id,email,display_name,avatar_url,tts_voice').single();
     if (updateError) throw updateError;
     await supabase.auth.updateUser({ data: { display_name: displayName, avatar_url: avatarUrl } });
     dashboardState.profile = profile;
@@ -618,7 +754,10 @@ document.querySelector('#openConversationForm').addEventListener('click', openCo
 document.querySelector('#emptyCreateButton').addEventListener('click', openConversationDialog);
 document.querySelector('#closeConversationForm').addEventListener('click', closeConversationDialog);
 document.querySelector('#cancelConversationForm').addEventListener('click', closeConversationDialog);
-document.querySelector('#closeDetail').addEventListener('click', () => conversationDetailDialog.close());
+document.querySelector('#closeDetail').addEventListener('click', () => {
+  if (dashboardState.autoplayActive) stopContinuousPlayback();
+  conversationDetailDialog.close();
+});
 
 agendaForm.addEventListener('submit', async (event) => {
   event.preventDefault();
@@ -667,15 +806,15 @@ textResponseForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   if (!textResponseForm.reportValidity() || !dashboardState.currentConversation) return;
   workspaceMessage.textContent = 'Posting response…';
-  const { error } = await supabase.from('conversation_entries').insert({
+  const { data: savedEntry, error } = await supabase.from('conversation_entries').insert({
     conversation_id: dashboardState.currentConversation.id,
     author_id: dashboardState.user.id,
     kind: 'text',
     status: 'ready',
     text_body: document.querySelector('#textResponseBody').value.trim(),
-  });
+  }).select('id,duration_seconds').single();
   if (error) workspaceMessage.textContent = `Could not post response: ${error.message}`;
-  else { textResponseForm.reset(); await loadConversationWorkspace(); }
+  else { await markEntryComplete(savedEntry); textResponseForm.reset(); await loadConversationWorkspace(); }
 });
 
 workspaceUpload.addEventListener('change', async () => {
@@ -689,6 +828,17 @@ workspaceUpload.addEventListener('change', async () => {
 recordAudioButton.addEventListener('click', () => startRecording('audio'));
 recordVideoButton.addEventListener('click', () => startRecording('video'));
 stopRecordingButton.addEventListener('click', () => dashboardState.recorder?.stop());
+playNewButton.addEventListener('click', () => {
+  const newEntries = dashboardState.entries.filter((entry) => !dashboardState.watchProgress.get(entry.id)?.completed);
+  playConversationEntries(newEntries);
+});
+playAllButton.addEventListener('click', () => playConversationEntries(dashboardState.entries));
+stopPlaybackButton.addEventListener('click', () => stopContinuousPlayback());
+workspaceEntries.addEventListener('click', (event) => {
+  const button = event.target.closest('[data-play-index]');
+  if (!button) return;
+  playConversationEntries(dashboardState.entries.slice(Number(button.dataset.playIndex)));
+});
 document.querySelector('#closeResponsePrompt').addEventListener('click', () => responsePromptDialog.close());
 document.querySelector('#promptRecordAudio').addEventListener('click', () => {
   responsePromptDialog.close();
