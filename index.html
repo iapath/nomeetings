@@ -174,6 +174,9 @@
 
         <section class="workspace-section response-studio">
           <div class="workspace-section-heading"><div><span class="section-kicker">Add context</span><h3>Recordings & responses</h3></div><span id="entryCount">0 responses</span></div>
+          <div class="workspace-list entry-list" id="workspaceEntries"></div>
+          <div class="response-composer">
+            <span class="section-kicker">Your response</span>
           <div class="response-actions">
             <label class="ghost upload-action">Upload video or audio<input id="workspaceUpload" type="file" accept="video/*,audio/*" /></label>
             <button class="ghost" id="recordAudioButton" type="button">Record audio</button>
@@ -183,8 +186,19 @@
           <p class="form-message upload-status" id="workspaceMessage" aria-live="polite"></p>
           <div class="upload-progress" id="uploadProgress" hidden role="progressbar" aria-label="Upload progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span id="uploadProgressBar"></span></div>
           <form class="text-response" id="textResponseForm"><textarea id="textResponseBody" rows="3" maxlength="5000" placeholder="Write an update, decision, question, or response…" required></textarea><button class="primary small" type="submit">Post text response</button></form>
-          <div class="workspace-list entry-list" id="workspaceEntries"></div>
+          </div>
         </section>
+      </div>
+    </dialog>
+
+    <dialog class="conversation-dialog response-prompt" id="responsePromptDialog">
+      <div class="dialog-heading"><div><p class="eyebrow">Your turn</p><h2>Respond to this Conversation</h2></div><button class="icon-button" id="closeResponsePrompt" type="button" aria-label="Close">×</button></div>
+      <p>The update is finished. Add your response while the context is fresh.</p>
+      <div class="prompt-actions">
+        <button class="primary" id="promptRecordVideo" type="button">Record video</button>
+        <button class="ghost" id="promptRecordAudio" type="button">Record audio</button>
+        <button class="ghost" id="promptUpload" type="button">Upload video or audio</button>
+        <button class="ghost" id="promptText" type="button">Write a response</button>
       </div>
     </dialog>
   </main>

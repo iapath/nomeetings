@@ -70,6 +70,7 @@ const recordVideoButton = document.querySelector('#recordVideoButton');
 const stopRecordingButton = document.querySelector('#stopRecordingButton');
 const uploadProgress = document.querySelector('#uploadProgress');
 const uploadProgressBar = document.querySelector('#uploadProgressBar');
+const responsePromptDialog = document.querySelector('#responsePromptDialog');
 
 const dashboardState = {
   user: null,
@@ -276,9 +277,17 @@ function renderConversationWorkspace() {
   workspaceEntries.innerHTML = dashboardState.entries.length ? dashboardState.entries.map((entry) => `
     <article class="workspace-row">
       <span class="entry-kind">${escapeHTML(entry.kind)}</span>
-      <div><h4>${escapeHTML(entry.profiles?.display_name || entry.profiles?.email || 'Participant')}</h4>${entry.text_body ? `<p>${escapeHTML(entry.text_body)}</p>` : `<p>${entry.status === 'ready' ? 'Clip uploaded and ready.' : escapeHTML(entry.status)}</p>`}${entry.media_url ? `<${entry.kind === 'audio' ? 'audio' : 'video'} class="entry-media" controls src="${escapeHTML(entry.media_url)}"></${entry.kind === 'audio' ? 'audio' : 'video'}>` : ''}</div>
+      <div><h4>${escapeHTML(entry.profiles?.display_name || entry.profiles?.email || 'Participant')}</h4>${entry.text_body ? `<p>${escapeHTML(entry.text_body)}</p>` : `<p>${entry.status === 'ready' ? 'Clip uploaded and ready.' : escapeHTML(entry.status)}</p>`}${entry.media_url ? `<${entry.kind === 'audio' ? 'audio' : 'video'} class="entry-media" controls data-entry-media="${entry.id}" src="${escapeHTML(entry.media_url)}"></${entry.kind === 'audio' ? 'audio' : 'video'}>` : ''}</div>
       <div class="workspace-row-meta"><span>${escapeHTML(formatDate(entry.created_at))}</span></div>
     </article>`).join('') : '<div class="empty-inline">No responses yet. Upload a clip, record one, or write an update.</div>';
+
+  workspaceEntries.querySelectorAll('video[data-entry-media]').forEach((video) => {
+    video.addEventListener('ended', () => {
+      const participant = dashboardState.participants.find((item) => item.user_id === dashboardState.user.id);
+      const entry = dashboardState.entries.find((item) => item.id === video.dataset.entryMedia);
+      if (participant?.role !== 'host' && entry?.author_id !== dashboardState.user.id) responsePromptDialog.showModal();
+    });
+  });
 }
 
 async function loadConversationWorkspace() {
@@ -286,9 +295,9 @@ async function loadConversationWorkspace() {
   workspaceMessage.textContent = 'Loading agenda, participants, and responses…';
   const [agendaResult, participantResult, inviteResult, entryResult] = await Promise.all([
     supabase.from('agenda_items').select('*').eq('conversation_id', conversationId).order('position'),
-    supabase.from('conversation_participants').select('role,response_required,response_status,created_at,profiles!conversation_participants_user_id_fkey(email,display_name)').eq('conversation_id', conversationId).order('created_at'),
+    supabase.from('conversation_participants').select('user_id,role,response_required,response_status,created_at,profiles!conversation_participants_user_id_fkey(email,display_name)').eq('conversation_id', conversationId).order('created_at'),
     supabase.from('conversation_invites').select('id,email,role,response_required,accepted_at,created_at').eq('conversation_id', conversationId).order('created_at'),
-    supabase.from('conversation_entries').select('id,kind,status,storage_bucket,storage_path,text_body,duration_seconds,size_bytes,created_at,profiles!conversation_entries_author_id_fkey(email,display_name)').eq('conversation_id', conversationId).order('created_at', { ascending: false }),
+    supabase.from('conversation_entries').select('id,author_id,kind,status,storage_bucket,storage_path,text_body,duration_seconds,size_bytes,created_at,profiles!conversation_entries_author_id_fkey(email,display_name)').eq('conversation_id', conversationId).order('created_at', { ascending: true }),
   ]);
   const error = agendaResult.error || participantResult.error || inviteResult.error || entryResult.error;
   if (error) throw error;
@@ -574,6 +583,24 @@ workspaceUpload.addEventListener('change', async () => {
 recordAudioButton.addEventListener('click', () => startRecording('audio'));
 recordVideoButton.addEventListener('click', () => startRecording('video'));
 stopRecordingButton.addEventListener('click', () => dashboardState.recorder?.stop());
+document.querySelector('#closeResponsePrompt').addEventListener('click', () => responsePromptDialog.close());
+document.querySelector('#promptRecordAudio').addEventListener('click', () => {
+  responsePromptDialog.close();
+  startRecording('audio');
+});
+document.querySelector('#promptRecordVideo').addEventListener('click', () => {
+  responsePromptDialog.close();
+  startRecording('video');
+});
+document.querySelector('#promptUpload').addEventListener('click', () => {
+  responsePromptDialog.close();
+  workspaceUpload.click();
+});
+document.querySelector('#promptText').addEventListener('click', () => {
+  responsePromptDialog.close();
+  document.querySelector('#textResponseBody').scrollIntoView({ behavior: 'smooth', block: 'center' });
+  document.querySelector('#textResponseBody').focus();
+});
 
 document.querySelector('.filter-pills').addEventListener('click', (event) => {
   const button = event.target.closest('[data-filter]');
