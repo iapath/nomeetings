@@ -56,12 +56,31 @@ const conversationForm = document.querySelector('#conversationForm');
 const conversationFormMessage = document.querySelector('#conversationFormMessage');
 const createConversationButton = document.querySelector('#createConversationButton');
 const conversationDetailDialog = document.querySelector('#conversationDetailDialog');
+const workspaceMessage = document.querySelector('#workspaceMessage');
+const workspaceAgenda = document.querySelector('#workspaceAgenda');
+const workspaceParticipants = document.querySelector('#workspaceParticipants');
+const workspaceEntries = document.querySelector('#workspaceEntries');
+const agendaForm = document.querySelector('#agendaForm');
+const inviteForm = document.querySelector('#inviteForm');
+const textResponseForm = document.querySelector('#textResponseForm');
+const workspaceUpload = document.querySelector('#workspaceUpload');
+const recordAudioButton = document.querySelector('#recordAudioButton');
+const recordVideoButton = document.querySelector('#recordVideoButton');
+const stopRecordingButton = document.querySelector('#stopRecordingButton');
 
 const dashboardState = {
   user: null,
   workspace: null,
   conversations: [],
   filter: 'all',
+  currentConversation: null,
+  agenda: [],
+  participants: [],
+  invites: [],
+  entries: [],
+  recorder: null,
+  recordingStream: null,
+  recordingChunks: [],
 };
 
 function escapeHTML(value = '') {
@@ -195,6 +214,7 @@ async function loadDashboard(user) {
   dashboardState.workspace = data?.[0];
   if (!dashboardState.workspace) throw new Error('No workspace was returned for this account.');
   workspaceName.textContent = dashboardState.workspace.workspace_name;
+  await supabase.rpc('claim_conversation_invites').catch(() => null);
   await loadConversations();
 }
 
@@ -210,15 +230,131 @@ function closeConversationDialog() {
   conversationDialog.close();
 }
 
-function showConversationDetail(conversationId) {
+function renderConversationWorkspace() {
+  document.querySelector('#agendaCount').textContent = `${dashboardState.agenda.length} item${dashboardState.agenda.length === 1 ? '' : 's'}`;
+  document.querySelector('#participantCount').textContent = `${dashboardState.participants.length + dashboardState.invites.filter((invite) => !invite.accepted_at).length} people`;
+  document.querySelector('#entryCount').textContent = `${dashboardState.entries.length} response${dashboardState.entries.length === 1 ? '' : 's'}`;
+
+  workspaceAgenda.innerHTML = dashboardState.agenda.length ? dashboardState.agenda.map((item, index) => `
+    <article class="workspace-row">
+      <div><h4>${index + 1}. ${escapeHTML(item.title)}</h4><p>${escapeHTML(item.description || 'No additional context.')}</p></div>
+      <div class="workspace-row-meta"><span class="pill ${item.default_required ? 'required' : ''}">${item.default_required ? 'Response required' : 'Optional'}</span></div>
+    </article>`).join('') : '<div class="empty-inline">Add the questions or topics people should address.</div>';
+
+  const participantRows = dashboardState.participants.map((participant) => `
+    <article class="workspace-row">
+      <div><h4>${escapeHTML(participant.profiles?.display_name || participant.profiles?.email || 'Participant')}</h4><p>${escapeHTML(participant.profiles?.email || '')}</p></div>
+      <div class="workspace-row-meta"><span class="pill">${escapeHTML(participant.role)}</span><span class="pill ${participant.response_required ? 'required' : ''}">${participant.response_required ? escapeHTML(participant.response_status) : 'No response required'}</span></div>
+    </article>`);
+  const inviteRows = dashboardState.invites.filter((invite) => !invite.accepted_at).map((invite) => `
+    <article class="workspace-row">
+      <div><h4>${escapeHTML(invite.email)}</h4><p>Invitation waiting for this person to create or use their account.</p></div>
+      <div class="workspace-row-meta"><span class="pill">${escapeHTML(invite.role)}</span><span class="pill">Pending invite</span></div>
+    </article>`);
+  workspaceParticipants.innerHTML = [...participantRows, ...inviteRows].join('') || '<div class="empty-inline">Invite the people who need this update.</div>';
+
+  workspaceEntries.innerHTML = dashboardState.entries.length ? dashboardState.entries.map((entry) => `
+    <article class="workspace-row">
+      <span class="entry-kind">${escapeHTML(entry.kind)}</span>
+      <div><h4>${escapeHTML(entry.profiles?.display_name || entry.profiles?.email || 'Participant')}</h4>${entry.text_body ? `<p>${escapeHTML(entry.text_body)}</p>` : `<p>${entry.status === 'ready' ? 'Clip uploaded and ready.' : escapeHTML(entry.status)}</p>`}${entry.media_url ? `<${entry.kind === 'audio' ? 'audio' : 'video'} class="entry-media" controls src="${escapeHTML(entry.media_url)}"></${entry.kind === 'audio' ? 'audio' : 'video'}>` : ''}</div>
+      <div class="workspace-row-meta"><span>${escapeHTML(formatDate(entry.created_at))}</span></div>
+    </article>`).join('') : '<div class="empty-inline">No responses yet. Upload a clip, record one, or write an update.</div>';
+}
+
+async function loadConversationWorkspace() {
+  const conversationId = dashboardState.currentConversation.id;
+  workspaceMessage.textContent = 'Loading agenda, participants, and responses…';
+  const [agendaResult, participantResult, inviteResult, entryResult] = await Promise.all([
+    supabase.from('agenda_items').select('*').eq('conversation_id', conversationId).order('position'),
+    supabase.from('conversation_participants').select('role,response_required,response_status,created_at,profiles!conversation_participants_user_id_fkey(email,display_name)').eq('conversation_id', conversationId).order('created_at'),
+    supabase.from('conversation_invites').select('id,email,role,response_required,accepted_at,created_at').eq('conversation_id', conversationId).order('created_at'),
+    supabase.from('conversation_entries').select('id,kind,status,storage_bucket,storage_path,text_body,duration_seconds,size_bytes,created_at,profiles!conversation_entries_author_id_fkey(email,display_name)').eq('conversation_id', conversationId).order('created_at', { ascending: false }),
+  ]);
+  const error = agendaResult.error || participantResult.error || inviteResult.error || entryResult.error;
+  if (error) throw error;
+  dashboardState.agenda = agendaResult.data || [];
+  dashboardState.participants = participantResult.data || [];
+  dashboardState.invites = inviteResult.data || [];
+  dashboardState.entries = entryResult.data || [];
+
+  await Promise.all(dashboardState.entries.map(async (entry) => {
+    if (!entry.storage_path || !entry.storage_bucket) return;
+    const { data } = await supabase.storage.from(entry.storage_bucket).createSignedUrl(entry.storage_path, 3600);
+    entry.media_url = data?.signedUrl || null;
+  }));
+  workspaceMessage.textContent = '';
+  renderConversationWorkspace();
+}
+
+async function showConversationDetail(conversationId) {
   const conversation = dashboardState.conversations.find((item) => item.id === conversationId);
   if (!conversation) return;
+  dashboardState.currentConversation = conversation;
   document.querySelector('#detailStatus').textContent = conversation.status;
   document.querySelector('#detailTitle').textContent = conversation.title;
   document.querySelector('#detailDescription').textContent = conversation.description || 'No description yet.';
   document.querySelector('#detailDue').textContent = `Due ${formatDate(conversation.due_at)}`;
   document.querySelector('#detailCreated').textContent = `Created ${formatDate(conversation.created_at, 'today')}`;
   conversationDetailDialog.showModal();
+  try {
+    await loadConversationWorkspace();
+  } catch (error) {
+    workspaceMessage.textContent = `Could not load this Conversation: ${error.message}`;
+  }
+}
+
+async function uploadConversationClip(file, forcedKind) {
+  if (!file || !dashboardState.currentConversation) return;
+  const conversation = dashboardState.currentConversation;
+  const kind = forcedKind || (file.type.startsWith('audio/') ? 'audio' : 'video');
+  const extension = file.name?.split('.').pop() || (kind === 'audio' ? 'webm' : 'webm');
+  const path = `${conversation.id}/${dashboardState.user.id}/${crypto.randomUUID()}.${extension}`;
+  workspaceMessage.textContent = `Uploading ${file.name || `${kind} recording`}…`;
+
+  const { error: uploadError } = await supabase.storage.from('conversation-clips').upload(path, file, { contentType: file.type, upsert: false });
+  if (uploadError) throw uploadError;
+  const { error: entryError } = await supabase.from('conversation_entries').insert({
+    conversation_id: conversation.id,
+    author_id: dashboardState.user.id,
+    kind,
+    status: 'ready',
+    storage_bucket: 'conversation-clips',
+    storage_path: path,
+    size_bytes: file.size,
+  });
+  if (entryError) {
+    await supabase.storage.from('conversation-clips').remove([path]);
+    throw entryError;
+  }
+  workspaceMessage.textContent = 'Clip uploaded.';
+  await loadConversationWorkspace();
+}
+
+async function startRecording(kind) {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia(kind === 'video' ? { video: true, audio: true } : { audio: true });
+    dashboardState.recordingStream = stream;
+    dashboardState.recordingChunks = [];
+    const recorder = new MediaRecorder(stream);
+    dashboardState.recorder = recorder;
+    recorder.addEventListener('dataavailable', (event) => { if (event.data.size) dashboardState.recordingChunks.push(event.data); });
+    recorder.addEventListener('stop', async () => {
+      const blob = new Blob(dashboardState.recordingChunks, { type: recorder.mimeType || `${kind}/webm` });
+      dashboardState.recordingStream?.getTracks().forEach((track) => track.stop());
+      recordAudioButton.disabled = false;
+      recordVideoButton.disabled = false;
+      stopRecordingButton.disabled = true;
+      try { await uploadConversationClip(new File([blob], `${kind}-${Date.now()}.webm`, { type: blob.type }), kind); }
+      catch (error) { workspaceMessage.textContent = `Could not save recording: ${error.message}`; }
+    });
+    recorder.start();
+    recordAudioButton.disabled = true;
+    recordVideoButton.disabled = true;
+    stopRecordingButton.disabled = false;
+    workspaceMessage.textContent = `Recording ${kind}…`;
+  } catch (error) {
+    workspaceMessage.textContent = `Could not start recording: ${error.message}`;
+  }
 }
 
 async function refreshSession() {
@@ -318,6 +454,63 @@ document.querySelector('#emptyCreateButton').addEventListener('click', openConve
 document.querySelector('#closeConversationForm').addEventListener('click', closeConversationDialog);
 document.querySelector('#cancelConversationForm').addEventListener('click', closeConversationDialog);
 document.querySelector('#closeDetail').addEventListener('click', () => conversationDetailDialog.close());
+
+agendaForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  if (!agendaForm.reportValidity() || !dashboardState.currentConversation) return;
+  workspaceMessage.textContent = 'Adding agenda item…';
+  const { error } = await supabase.from('agenda_items').insert({
+    conversation_id: dashboardState.currentConversation.id,
+    title: document.querySelector('#agendaTitle').value.trim(),
+    description: document.querySelector('#agendaDescription').value.trim() || null,
+    position: dashboardState.agenda.length,
+    default_required: document.querySelector('#agendaRequired').checked,
+  });
+  if (error) workspaceMessage.textContent = `Could not add agenda item: ${error.message}`;
+  else { agendaForm.reset(); await loadConversationWorkspace(); }
+});
+
+inviteForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  if (!inviteForm.reportValidity() || !dashboardState.currentConversation) return;
+  const email = document.querySelector('#inviteEmail').value.trim();
+  workspaceMessage.textContent = `Inviting ${email}…`;
+  const { error } = await supabase.rpc('invite_to_conversation', {
+    target_conversation_id: dashboardState.currentConversation.id,
+    target_email: email,
+    target_role: document.querySelector('#inviteRole').value,
+    target_response_required: document.querySelector('#inviteResponseRequired').checked,
+  });
+  if (error) workspaceMessage.textContent = `Could not invite participant: ${error.message}`;
+  else { inviteForm.reset(); document.querySelector('#inviteResponseRequired').checked = true; await loadConversationWorkspace(); }
+});
+
+textResponseForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  if (!textResponseForm.reportValidity() || !dashboardState.currentConversation) return;
+  workspaceMessage.textContent = 'Posting response…';
+  const { error } = await supabase.from('conversation_entries').insert({
+    conversation_id: dashboardState.currentConversation.id,
+    author_id: dashboardState.user.id,
+    kind: 'text',
+    status: 'ready',
+    text_body: document.querySelector('#textResponseBody').value.trim(),
+  });
+  if (error) workspaceMessage.textContent = `Could not post response: ${error.message}`;
+  else { textResponseForm.reset(); await loadConversationWorkspace(); }
+});
+
+workspaceUpload.addEventListener('change', async () => {
+  const file = workspaceUpload.files?.[0];
+  if (!file) return;
+  try { await uploadConversationClip(file); }
+  catch (error) { workspaceMessage.textContent = `Could not upload clip: ${error.message}`; }
+  finally { workspaceUpload.value = ''; }
+});
+
+recordAudioButton.addEventListener('click', () => startRecording('audio'));
+recordVideoButton.addEventListener('click', () => startRecording('video'));
+stopRecordingButton.addEventListener('click', () => dashboardState.recorder?.stop());
 
 document.querySelector('.filter-pills').addEventListener('click', (event) => {
   const button = event.target.closest('[data-filter]');

@@ -145,11 +145,46 @@
       </form>
     </dialog>
 
-    <dialog class="conversation-dialog detail-dialog" id="conversationDetailDialog">
+    <dialog class="conversation-dialog detail-dialog workspace-dialog" id="conversationDetailDialog">
       <div class="dialog-heading"><div><p class="eyebrow" id="detailStatus">Conversation</p><h2 id="detailTitle"></h2></div><button class="icon-button" id="closeDetail" type="button" aria-label="Close">×</button></div>
       <p id="detailDescription"></p>
       <div class="detail-meta"><span id="detailDue"></span><span id="detailCreated"></span></div>
-      <div class="dashboard-note">Agenda items, participants, recordings, and responses will live here in the next build.</div>
+      <p class="form-message" id="workspaceMessage"></p>
+      <div class="workspace-sections">
+        <section class="workspace-section">
+          <div class="workspace-section-heading"><div><span class="section-kicker">Plan it</span><h3>Agenda</h3></div><span id="agendaCount">0 items</span></div>
+          <form class="inline-builder" id="agendaForm">
+            <input id="agendaTitle" maxlength="120" placeholder="Agenda item" required />
+            <input id="agendaDescription" maxlength="300" placeholder="Context or question (optional)" />
+            <label class="compact-check"><input id="agendaRequired" type="checkbox" /> Response required</label>
+            <button class="primary small" type="submit">Add item</button>
+          </form>
+          <div class="workspace-list" id="workspaceAgenda"></div>
+        </section>
+
+        <section class="workspace-section">
+          <div class="workspace-section-heading"><div><span class="section-kicker">Bring people in</span><h3>Participants</h3></div><span id="participantCount">0 people</span></div>
+          <form class="invite-builder" id="inviteForm">
+            <input id="inviteEmail" type="email" placeholder="teammate@company.com" required />
+            <select id="inviteRole"><option value="required">Required</option><option value="optional">Optional</option><option value="viewer">Viewer</option></select>
+            <label class="compact-check"><input id="inviteResponseRequired" type="checkbox" checked /> Must respond</label>
+            <button class="primary small" type="submit">Invite</button>
+          </form>
+          <div class="workspace-list" id="workspaceParticipants"></div>
+        </section>
+
+        <section class="workspace-section response-studio">
+          <div class="workspace-section-heading"><div><span class="section-kicker">Add context</span><h3>Recordings & responses</h3></div><span id="entryCount">0 responses</span></div>
+          <div class="response-actions">
+            <label class="ghost upload-action">Upload video or audio<input id="workspaceUpload" type="file" accept="video/*,audio/*" /></label>
+            <button class="ghost" id="recordAudioButton" type="button">Record audio</button>
+            <button class="ghost" id="recordVideoButton" type="button">Record video</button>
+            <button class="ghost" id="stopRecordingButton" type="button" disabled>Stop recording</button>
+          </div>
+          <form class="text-response" id="textResponseForm"><textarea id="textResponseBody" rows="3" maxlength="5000" placeholder="Write an update, decision, question, or response…" required></textarea><button class="primary small" type="submit">Post text response</button></form>
+          <div class="workspace-list entry-list" id="workspaceEntries"></div>
+        </section>
+      </div>
     </dialog>
   </main>
   <script type="module" src="app.js"></script>
