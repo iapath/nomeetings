@@ -35,6 +35,7 @@ const statusLine = document.querySelector('#statusLine');
 const authPanel = document.querySelector('#authPanel');
 const emailForm = document.querySelector('#emailForm');
 const emailInput = document.querySelector('#emailInput');
+const emailSubmit = document.querySelector('#emailSubmit');
 const markerLabel = document.querySelector('#markerLabel');
 const markerTime = document.querySelector('#markerTime');
 const markerLog = document.querySelector('#markerLog');
@@ -125,9 +126,30 @@ emailForm.addEventListener('submit', async (event) => {
     return;
   }
   const email = emailInput.value.trim();
-  if (!email) return;
-  const { error } = await supabase.auth.signInWithOtp({ email, options: { emailRedirectTo: window.location.origin } });
-  statusLine.textContent = error ? error.message : `Magic link sent to ${email}.`;
+  if (!email || !emailInput.checkValidity()) {
+    emailInput.reportValidity();
+    statusLine.textContent = 'Enter a valid email address to receive your magic link.';
+    return;
+  }
+
+  emailSubmit.disabled = true;
+  emailSubmit.textContent = 'Sending…';
+  statusLine.textContent = `Sending a magic link to ${email}…`;
+
+  try {
+    const { error } = await supabase.auth.signInWithOtp({
+      email,
+      options: { emailRedirectTo: `${window.location.origin}/` },
+    });
+    statusLine.textContent = error
+      ? `Could not send the magic link: ${error.message}`
+      : `Magic link sent to ${email}. Check your inbox and spam folder.`;
+  } catch (error) {
+    statusLine.textContent = `Could not contact Supabase: ${error.message}`;
+  } finally {
+    emailSubmit.disabled = false;
+    emailSubmit.textContent = 'Send magic link';
+  }
 });
 
 renderAgenda();
