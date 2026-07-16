@@ -1,4 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import * as tus from 'https://esm.sh/tus-js-client@4';
 
 const SUPABASE_URL = 'https://kepkisctnlomykhyqywh.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtlcGtpc2N0bmxvbXlraHlxeXdoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQyMDQ1NjUsImV4cCI6MjA5OTc4MDU2NX0.4RbX_nDxQDQHZ-vkNvvAtdv0TkWr_km51YnTFPGIV20';
@@ -328,12 +329,40 @@ async function uploadConversationClip(file, forcedKind) {
   const kind = forcedKind || (file.type.startsWith('audio/') ? 'audio' : 'video');
   const extension = file.name?.split('.').pop() || (kind === 'audio' ? 'webm' : 'webm');
   const path = `${conversation.id}/${dashboardState.user.id}/${crypto.randomUUID()}.${extension}`;
-  setUploadProgress(`Preparing ${file.name || `${kind} recording`}…`, 8);
+  setUploadProgress(`Preparing ${file.name || `${kind} recording`}…`, 1);
+  const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+  if (sessionError || !session?.access_token) throw sessionError || new Error('Your sign-in session expired. Please sign in again.');
 
-  setUploadProgress(`Uploading ${file.name || `${kind} recording`}…`, null, true);
-  const { error: uploadError } = await supabase.storage.from('conversation-clips').upload(path, file, { contentType: file.type, upsert: false });
-  if (uploadError) throw uploadError;
-  setUploadProgress('Upload finished. Saving the response…', 88);
+  await new Promise((resolve, reject) => {
+    const upload = new tus.Upload(file, {
+      endpoint: 'https://kepkisctnlomykhyqywh.storage.supabase.co/storage/v1/upload/resumable',
+      retryDelays: [0, 3000, 5000, 10000, 20000],
+      headers: { authorization: `Bearer ${session.access_token}`, 'x-upsert': 'false' },
+      uploadDataDuringCreation: true,
+      removeFingerprintOnSuccess: true,
+      chunkSize: 6 * 1024 * 1024,
+      metadata: {
+        bucketName: 'conversation-clips',
+        objectName: path,
+        contentType: file.type || 'application/octet-stream',
+        cacheControl: '3600',
+      },
+      onError: reject,
+      onProgress: (bytesUploaded, bytesTotal) => {
+        const percent = bytesTotal ? Math.round((bytesUploaded / bytesTotal) * 100) : 0;
+        const uploadedMB = (bytesUploaded / 1024 / 1024).toFixed(1);
+        const totalMB = (bytesTotal / 1024 / 1024).toFixed(1);
+        setUploadProgress(`Uploading ${uploadedMB} of ${totalMB} MB — ${percent}%`, percent);
+      },
+      onSuccess: resolve,
+    });
+    upload.findPreviousUploads().then((previousUploads) => {
+      if (previousUploads.length) upload.resumeFromPreviousUpload(previousUploads[0]);
+      upload.start();
+    }).catch(reject);
+  });
+
+  setUploadProgress('Upload finished. Saving the response…', 100);
   const { error: entryError } = await supabase.from('conversation_entries').insert({
     conversation_id: conversation.id,
     author_id: dashboardState.user.id,
