@@ -193,6 +193,7 @@ function renderConversations() {
         <h3>${escapeHTML(conversation.title)}</h3>
         <p>${escapeHTML(conversation.description || 'No description yet.')}</p>
         <div class="conversation-card-meta">
+          <span>${escapeHTML(conversation.workspaces?.name || 'Shared workspace')}</span>
           <span>Due ${escapeHTML(formatDate(conversation.due_at))}</span>
           <span>Up to ${Math.round(conversation.max_duration_seconds / 60)} minute clips</span>
         </div>
@@ -208,8 +209,7 @@ async function loadConversations() {
   dashboardStatus.textContent = 'Loading your Conversations…';
   const { data, error } = await supabase
     .from('conversations')
-    .select('id,title,description,due_at,status,max_duration_seconds,created_at,updated_at')
-    .eq('workspace_id', dashboardState.workspace.workspace_id)
+    .select('id,workspace_id,title,description,due_at,status,max_duration_seconds,created_at,updated_at,workspaces(name)')
     .order('updated_at', { ascending: false });
 
   if (error) throw error;
@@ -531,8 +531,21 @@ inviteForm.addEventListener('submit', async (event) => {
     target_role: document.querySelector('#inviteRole').value,
     target_response_required: document.querySelector('#inviteResponseRequired').checked,
   });
-  if (error) workspaceMessage.textContent = `Could not invite participant: ${error.message}`;
-  else { inviteForm.reset(); document.querySelector('#inviteResponseRequired').checked = true; await loadConversationWorkspace(); }
+  if (error) {
+    workspaceMessage.textContent = `Could not invite participant: ${error.message}`;
+    return;
+  }
+
+  const { error: emailError } = await supabase.auth.signInWithOtp({
+    email,
+    options: { shouldCreateUser: true, emailRedirectTo: `${window.location.origin}/` },
+  });
+  inviteForm.reset();
+  document.querySelector('#inviteResponseRequired').checked = true;
+  await loadConversationWorkspace();
+  workspaceMessage.textContent = emailError
+    ? `Access was added, but the invitation email could not be sent: ${emailError.message}`
+    : `Invitation email sent to ${email}.`;
 });
 
 textResponseForm.addEventListener('submit', async (event) => {
