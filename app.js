@@ -67,6 +67,8 @@ const workspaceUpload = document.querySelector('#workspaceUpload');
 const recordAudioButton = document.querySelector('#recordAudioButton');
 const recordVideoButton = document.querySelector('#recordVideoButton');
 const stopRecordingButton = document.querySelector('#stopRecordingButton');
+const uploadProgress = document.querySelector('#uploadProgress');
+const uploadProgressBar = document.querySelector('#uploadProgressBar');
 
 const dashboardState = {
   user: null,
@@ -92,6 +94,22 @@ function escapeHTML(value = '') {
 function formatDate(value, fallback = 'No deadline') {
   if (!value) return fallback;
   return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value));
+}
+
+function setUploadProgress(message, percent = null, indeterminate = false) {
+  workspaceMessage.textContent = message;
+  uploadProgress.hidden = false;
+  uploadProgress.classList.toggle('indeterminate', indeterminate);
+  const value = percent ?? 0;
+  uploadProgress.setAttribute('aria-valuenow', String(value));
+  uploadProgressBar.style.width = indeterminate ? '' : `${value}%`;
+}
+
+function clearUploadProgress() {
+  uploadProgress.hidden = true;
+  uploadProgress.classList.remove('indeterminate');
+  uploadProgressBar.style.width = '0%';
+  uploadProgress.setAttribute('aria-valuenow', '0');
 }
 
 function setView(isSignedIn) {
@@ -310,10 +328,12 @@ async function uploadConversationClip(file, forcedKind) {
   const kind = forcedKind || (file.type.startsWith('audio/') ? 'audio' : 'video');
   const extension = file.name?.split('.').pop() || (kind === 'audio' ? 'webm' : 'webm');
   const path = `${conversation.id}/${dashboardState.user.id}/${crypto.randomUUID()}.${extension}`;
-  workspaceMessage.textContent = `Uploading ${file.name || `${kind} recording`}…`;
+  setUploadProgress(`Preparing ${file.name || `${kind} recording`}…`, 8);
 
+  setUploadProgress(`Uploading ${file.name || `${kind} recording`}…`, null, true);
   const { error: uploadError } = await supabase.storage.from('conversation-clips').upload(path, file, { contentType: file.type, upsert: false });
   if (uploadError) throw uploadError;
+  setUploadProgress('Upload finished. Saving the response…', 88);
   const { error: entryError } = await supabase.from('conversation_entries').insert({
     conversation_id: conversation.id,
     author_id: dashboardState.user.id,
@@ -327,8 +347,8 @@ async function uploadConversationClip(file, forcedKind) {
     await supabase.storage.from('conversation-clips').remove([path]);
     throw entryError;
   }
-  workspaceMessage.textContent = 'Clip uploaded.';
   await loadConversationWorkspace();
+  setUploadProgress('Clip uploaded and ready.', 100);
 }
 
 async function startRecording(kind) {
@@ -505,7 +525,7 @@ workspaceUpload.addEventListener('change', async () => {
   const file = workspaceUpload.files?.[0];
   if (!file) return;
   try { await uploadConversationClip(file); }
-  catch (error) { workspaceMessage.textContent = `Could not upload clip: ${error.message}`; }
+  catch (error) { setUploadProgress(`Could not upload clip: ${error.message}`, 0); }
   finally { workspaceUpload.value = ''; }
 });
 

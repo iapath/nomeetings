@@ -149,7 +149,6 @@
       <div class="dialog-heading"><div><p class="eyebrow" id="detailStatus">Conversation</p><h2 id="detailTitle"></h2></div><button class="icon-button" id="closeDetail" type="button" aria-label="Close">×</button></div>
       <p id="detailDescription"></p>
       <div class="detail-meta"><span id="detailDue"></span><span id="detailCreated"></span></div>
-      <p class="form-message" id="workspaceMessage"></p>
       <div class="workspace-sections">
         <section class="workspace-section">
           <div class="workspace-section-heading"><div><span class="section-kicker">Plan it</span><h3>Agenda</h3></div><span id="agendaCount">0 items</span></div>
@@ -181,6 +180,8 @@
             <button class="ghost" id="recordVideoButton" type="button">Record video</button>
             <button class="ghost" id="stopRecordingButton" type="button" disabled>Stop recording</button>
           </div>
+          <p class="form-message upload-status" id="workspaceMessage" aria-live="polite"></p>
+          <div class="upload-progress" id="uploadProgress" hidden role="progressbar" aria-label="Upload progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span id="uploadProgressBar"></span></div>
           <form class="text-response" id="textResponseForm"><textarea id="textResponseBody" rows="3" maxlength="5000" placeholder="Write an update, decision, question, or response…" required></textarea><button class="primary small" type="submit">Post text response</button></form>
           <div class="workspace-list entry-list" id="workspaceEntries"></div>
         </section>
