@@ -214,7 +214,8 @@ async function loadDashboard(user) {
   dashboardState.workspace = data?.[0];
   if (!dashboardState.workspace) throw new Error('No workspace was returned for this account.');
   workspaceName.textContent = dashboardState.workspace.workspace_name;
-  await supabase.rpc('claim_conversation_invites').catch(() => null);
+  const { error: claimInviteError } = await supabase.rpc('claim_conversation_invites');
+  if (claimInviteError) console.warn('Could not claim pending Conversation invites', claimInviteError);
   await loadConversations();
 }
 
