@@ -10,7 +10,7 @@ Deno.serve(async (req) => {
 
   try {
     const apiKey = Deno.env.get('ELEVENLABS_API_KEY');
-    if (!apiKey) throw new Error('ElevenLabs is not connected yet.');
+    if (!apiKey) throw new Error('Voice generation is not connected yet.');
     const authorization = req.headers.get('Authorization');
     if (!authorization) return Response.json({ error: 'Sign in is required.' }, { status: 401, headers: corsHeaders });
 
@@ -46,7 +46,7 @@ Deno.serve(async (req) => {
         voice_settings: { stability: 0.55, similarity_boost: 0.8, style: 0.15, use_speaker_boost: true, speed: 1.0 },
       }),
     });
-    if (!speechResponse.ok) throw new Error(`ElevenLabs generation failed (${speechResponse.status}): ${(await speechResponse.text()).slice(0, 240)}`);
+    if (!speechResponse.ok) throw new Error(`Voice generation failed (${speechResponse.status}): ${(await speechResponse.text()).slice(0, 240)}`);
 
     const audio = new Uint8Array(await speechResponse.arrayBuffer());
     const words: Array<{ text: string; start: number; end: number }> = [];

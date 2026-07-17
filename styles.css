@@ -163,6 +163,11 @@ button:disabled { cursor:wait; opacity:.58; }
 .entry-list .workspace-row p.spoken-text { margin:10px 0 2px; padding:14px 16px; border:1px solid rgba(255,255,255,.08); border-left:3px solid var(--red); border-radius:5px 14px 14px 5px; background:linear-gradient(100deg,rgba(226,63,83,.12),rgba(255,255,255,.045)); color:#f7f4f0; opacity:1; font-size:1.08rem; font-weight:620; line-height:1.55; }
 .spoken-text span { color:#f7f4f0; border-radius:.22em; padding:.02em .05em; transition:color .08s ease, background .08s ease, box-shadow .08s ease; }
 .spoken-text span.speaking { color:#fff; background:var(--red); box-shadow:0 0 0 .14em color-mix(in srgb, var(--red) 28%, transparent),0 0 18px rgba(226,63,83,.3); }
+.media-transcript { margin-top:12px !important; font-size:.98rem !important; font-weight:540 !important; }
+.caption-line { display:inline; }
+.media-transcript.caption-active { min-height:3.4em; display:flex; align-items:center; font-size:1.08rem !important; }
+.media-transcript.caption-active .caption-line { display:none; }
+.media-transcript.caption-active .caption-line.active { display:inline; }
 
 @media (max-width:900px) {
   .dashboard-hero { display:grid; align-items:start; }
