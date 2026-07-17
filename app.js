@@ -151,19 +151,17 @@ function renderAccountProfile() {
 }
 
 function loadVoiceOptions() {
-  if (!('speechSynthesis' in window)) {
-    profileVoiceSelect.innerHTML = '<option value="">Text-to-speech is unavailable on this device</option>';
-    profileVoiceSelect.disabled = true;
-    return;
-  }
-  const voices = speechSynthesis.getVoices().filter((voice) => voice.lang.toLowerCase().startsWith('en'));
   const selected = dashboardState.profile?.tts_voice || '';
-  profileVoiceSelect.innerHTML = '<option value="">Default voice</option>' + voices.map((voice) =>
-    `<option value="${escapeHTML(voice.name)}">${escapeHTML(voice.name)} · ${escapeHTML(voice.lang)}</option>`).join('');
-  profileVoiceSelect.value = voices.some((voice) => voice.name === selected) ? selected : '';
+  const voices = [
+    { id: 'JBFqnCBsd6RMkjVDRZzb', label: 'George · warm male voice' },
+    { id: '21m00Tcm4TlvDq8ikWAM', label: 'Rachel · clear female voice' },
+    { id: 'pNInz6obpgDQGcFmaJgB', label: 'Adam · deep male voice' },
+  ];
+  profileVoiceSelect.disabled = false;
+  profileVoiceSelect.innerHTML = '<option value="">George · default</option>' + voices.map((voice) =>
+    `<option value="${voice.id}">${escapeHTML(voice.label)}</option>`).join('');
+  profileVoiceSelect.value = voices.some((voice) => voice.id === selected) ? selected : '';
 }
-
-if ('speechSynthesis' in window) speechSynthesis.addEventListener('voiceschanged', loadVoiceOptions);
 
 function setUploadProgress(message, percent = null, indeterminate = false) {
   workspaceMessage.textContent = message;
@@ -351,7 +349,7 @@ function renderConversationWorkspace() {
   workspaceEntries.innerHTML = dashboardState.entries.length ? dashboardState.entries.map((entry, index) => `
     <article class="workspace-row ${dashboardState.watchProgress.get(entry.id)?.completed ? 'watched' : ''}" data-entry-row="${entry.id}">
       <span class="entry-kind">${escapeHTML(entry.kind)}</span>
-      <div><div class="identity-line">${avatarMarkup(entry.profiles)}<h4>${escapeHTML(entry.profiles?.display_name || entry.profiles?.email || 'Participant')}</h4></div>${entry.text_body ? `<p>${escapeHTML(entry.text_body)}</p>` : `<p>${entry.status === 'ready' ? 'Clip uploaded and ready.' : escapeHTML(entry.status)}</p>`}${entry.media_url ? `<${entry.kind === 'audio' ? 'audio' : 'video'} class="entry-media" controls data-entry-media="${entry.id}" src="${escapeHTML(entry.media_url)}"></${entry.kind === 'audio' ? 'audio' : 'video'}>` : ''}</div>
+      <div><div class="identity-line">${avatarMarkup(entry.profiles)}<h4>${escapeHTML(entry.profiles?.display_name || entry.profiles?.email || 'Participant')}</h4></div>${entry.text_body ? `<p>${escapeHTML(entry.text_body)}</p>` : `<p>${entry.status === 'ready' ? 'Clip uploaded and ready.' : escapeHTML(entry.status)}</p>`}${entry.media_url ? `<${entry.kind === 'video' ? 'video' : 'audio'} class="entry-media" controls data-entry-media="${entry.id}" src="${escapeHTML(entry.media_url)}"></${entry.kind === 'video' ? 'video' : 'audio'}>` : ''}</div>
       <div class="workspace-row-meta"><span class="watch-state">${dashboardState.watchProgress.get(entry.id)?.completed ? '✓ Played' : 'New'}</span><span>${escapeHTML(formatDate(entry.created_at))}</span><button class="ghost play-from-entry" type="button" data-play-index="${index}">Play from here</button></div>
     </article>`).join('') : '<div class="empty-inline">No responses yet. Upload a clip, record one, or write an update.</div>';
 
@@ -415,6 +413,32 @@ function speakTextEntry(entry) {
   });
 }
 
+async function generateTextAudio(entry) {
+  playbackStatus.textContent = `Preparing ${entry.profiles?.display_name || 'this participant'}'s voice…`;
+  const { data, error } = await supabase.functions.invoke('generate-text-audio', { body: { entry_id: entry.id } });
+  if (error) throw error;
+  if (data?.error) throw new Error(data.error);
+  entry.storage_bucket = data.storage_bucket;
+  entry.storage_path = data.storage_path;
+  const { data: signed, error: signedError } = await supabase.storage.from(data.storage_bucket).createSignedUrl(data.storage_path, 3600);
+  if (signedError || !signed?.signedUrl) throw signedError || new Error('The generated voice could not be opened.');
+  entry.media_url = signed.signedUrl;
+  renderConversationWorkspace();
+}
+
+async function playTextEntry(entry) {
+  if (!entry.media_url) {
+    try { await generateTextAudio(entry); }
+    catch (error) {
+      console.warn('Falling back to device text-to-speech', error);
+      playbackStatus.textContent = 'Using the temporary device voice. ElevenLabs audio is not ready yet.';
+      await speakTextEntry(entry);
+      return;
+    }
+  }
+  await playMediaEntry(entry);
+}
+
 function playMediaEntry(entry) {
   return new Promise(async (resolve, reject) => {
     const media = workspaceEntries.querySelector(`[data-entry-media="${entry.id}"]`);
@@ -451,7 +475,7 @@ async function playConversationEntries(entries) {
       const author = entry.profiles?.display_name || entry.profiles?.email || 'Participant';
       playbackStatus.textContent = entry.kind === 'text' ? `Reading ${author}'s response…` : `Playing ${author}'s ${entry.kind}…`;
       workspaceEntries.querySelector(`[data-entry-row="${entry.id}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      if (entry.kind === 'text') await speakTextEntry(entry);
+      if (entry.kind === 'text') await playTextEntry(entry);
       else await playMediaEntry(entry);
       dashboardState.playbackResolve = null;
       dashboardState.currentMedia = null;
@@ -814,7 +838,16 @@ textResponseForm.addEventListener('submit', async (event) => {
     text_body: document.querySelector('#textResponseBody').value.trim(),
   }).select('id,duration_seconds').single();
   if (error) workspaceMessage.textContent = `Could not post response: ${error.message}`;
-  else { await markEntryComplete(savedEntry); textResponseForm.reset(); await loadConversationWorkspace(); }
+  else {
+    await markEntryComplete(savedEntry);
+    textResponseForm.reset();
+    workspaceMessage.textContent = 'Response posted. Creating its ElevenLabs voice…';
+    const { data: voiceData, error: voiceError } = await supabase.functions.invoke('generate-text-audio', { body: { entry_id: savedEntry.id } });
+    await loadConversationWorkspace();
+    workspaceMessage.textContent = voiceError || voiceData?.error
+      ? 'Response posted. Its generated voice is pending, so playback will temporarily use the device voice.'
+      : 'Response posted and voice audio is ready.';
+  }
 });
 
 workspaceUpload.addEventListener('change', async () => {
