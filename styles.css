@@ -148,6 +148,9 @@ button:disabled { cursor:wait; opacity:.58; }
 .identity-line h4 { margin:0; }
 .row-avatar,.row-avatar-fallback { width:34px; height:34px; flex:0 0 auto; }
 .entry-media { width:min(100%,700px); height:42px; margin-top:9px; opacity:.72; }
+.voice-processing { display:flex; align-items:center; gap:9px; width:max-content; margin-top:10px; padding:8px 11px; border-radius:999px; background:rgba(226,63,83,.1); color:#f3b6bd; font-size:.76rem; font-weight:750; }
+.voice-processing span { width:8px; height:8px; border-radius:50%; background:var(--red); box-shadow:0 0 0 0 rgba(226,63,83,.5); animation:voice-pulse 1.35s ease-out infinite; }
+@keyframes voice-pulse { 70% { box-shadow:0 0 0 7px rgba(226,63,83,0); } 100% { box-shadow:0 0 0 0 rgba(226,63,83,0); } }
 .loading-row { opacity:.58; }
 .response-prompt { padding:28px; }
 .response-prompt p { opacity:.7; line-height:1.5; }

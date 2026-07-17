@@ -354,7 +354,7 @@ function renderConversationWorkspace() {
   workspaceEntries.innerHTML = dashboardState.entries.length ? dashboardState.entries.map((entry, index) => `
     <article class="workspace-row ${dashboardState.watchProgress.get(entry.id)?.completed ? 'watched' : ''}" data-entry-row="${entry.id}">
       <span class="entry-kind">${escapeHTML(entry.kind)}</span>
-      <div><div class="identity-line">${avatarMarkup(entry.profiles)}<h4>${escapeHTML(entry.profiles?.display_name || entry.profiles?.email || 'Participant')}</h4></div>${entry.text_body ? `<p class="spoken-text" data-spoken-text="${entry.id}">${entry.tts_alignment?.length ? entry.tts_alignment.map((word, wordIndex) => `<span data-spoken-word="${wordIndex}">${escapeHTML(word.text)}</span>`).join(' ') : escapeHTML(entry.text_body)}</p>` : `<p>${entry.status === 'ready' ? 'Clip uploaded and ready.' : escapeHTML(entry.status)}</p>`}${entry.media_url ? `<${entry.kind === 'video' ? 'video' : 'audio'} class="entry-media" controls data-entry-media="${entry.id}" src="${escapeHTML(entry.media_url)}"></${entry.kind === 'video' ? 'video' : 'audio'}>` : ''}</div>
+      <div><div class="identity-line">${avatarMarkup(entry.profiles)}<h4>${escapeHTML(entry.profiles?.display_name || entry.profiles?.email || 'Participant')}</h4></div>${entry.text_body ? `<p class="spoken-text" data-spoken-text="${entry.id}">${entry.tts_alignment?.length ? entry.tts_alignment.map((word, wordIndex) => `<span data-spoken-word="${wordIndex}">${escapeHTML(word.text)}</span>`).join(' ') : escapeHTML(entry.text_body)}</p>` : `<p>${entry.status === 'ready' ? 'Clip uploaded and ready.' : escapeHTML(entry.status)}</p>`}${entry.kind === 'text' && !isElevenLabsReady(entry) ? '<div class="voice-processing"><span></span>ElevenLabs voice processing…</div>' : entry.media_url ? `<${entry.kind === 'video' ? 'video' : 'audio'} class="entry-media" controls data-entry-media="${entry.id}" src="${escapeHTML(entry.media_url)}"></${entry.kind === 'video' ? 'video' : 'audio'}>` : ''}</div>
       <div class="workspace-row-meta"><span class="watch-state">${dashboardState.watchProgress.get(entry.id)?.completed ? '✓ Played' : 'New'}</span><span>${escapeHTML(formatDate(entry.created_at))}</span><button class="ghost play-from-entry" type="button" data-play-index="${index}">Play from here</button></div>
     </article>`).join('') : '<div class="empty-inline">No responses yet. Upload a clip, record one, or write an update.</div>';
 
@@ -370,6 +370,30 @@ function renderConversationWorkspace() {
       if (entry && !dashboardState.autoplayActive) await markEntryComplete(entry);
       if (!dashboardState.autoplayActive && participant?.role !== 'host' && entry?.author_id !== dashboardState.user.id) responsePromptDialog.showModal();
     });
+  });
+}
+
+function isElevenLabsReady(entry) {
+  return entry.kind !== 'text' || Boolean(entry.media_url && entry.storage_path?.endsWith('-timed.mp3') && entry.tts_alignment?.length);
+}
+
+function preparePendingTextAudio() {
+  dashboardState.entries.filter((entry) => entry.kind === 'text' && !isElevenLabsReady(entry) && !entry.voiceGenerationInProgress).forEach(async (entry) => {
+    entry.voiceGenerationInProgress = true;
+    try {
+      await generateTextAudio(entry, false);
+      entry.voiceGenerationInProgress = false;
+      if (!dashboardState.autoplayActive) renderConversationWorkspace();
+    } catch (error) {
+      entry.voiceGenerationInProgress = false;
+      console.warn('ElevenLabs voice is still processing', error);
+      if (!dashboardState.voiceRefreshTimer) {
+        dashboardState.voiceRefreshTimer = window.setTimeout(async () => {
+          dashboardState.voiceRefreshTimer = null;
+          if (dashboardState.currentConversation) await loadConversationWorkspace();
+        }, 10000);
+      }
+    }
   });
 }
 
@@ -428,25 +452,7 @@ function stopContinuousPlayback(message = 'Playback stopped.') {
   playbackStatus.textContent = message;
 }
 
-function speakTextEntry(entry) {
-  return new Promise((resolve, reject) => {
-    if (!('speechSynthesis' in window)) {
-      reject(new Error('Text-to-speech is not available on this device.'));
-      return;
-    }
-    const utterance = new SpeechSynthesisUtterance(entry.text_body);
-    const voices = speechSynthesis.getVoices();
-    const preferred = voices.find((voice) => voice.name === entry.profiles?.tts_voice);
-    if (preferred) utterance.voice = preferred;
-    utterance.rate = 1;
-    utterance.onend = resolve;
-    utterance.onerror = (event) => event.error === 'canceled' ? resolve() : reject(new Error(`Text reader failed: ${event.error}`));
-    dashboardState.playbackResolve = resolve;
-    speechSynthesis.speak(utterance);
-  });
-}
-
-async function generateTextAudio(entry) {
+async function generateTextAudio(entry, shouldRender = true) {
   playbackStatus.textContent = `Preparing ${entry.profiles?.display_name || 'this participant'}'s voice…`;
   const invocation = supabase.functions.invoke('generate-text-audio', { body: { entry_id: entry.id } });
   const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('Voice timing took too long. Please try playing it again.')), 30000));
@@ -460,18 +466,17 @@ async function generateTextAudio(entry) {
   const { data: signed, error: signedError } = await supabase.storage.from(data.storage_bucket).createSignedUrl(data.storage_path, 3600);
   if (signedError || !signed?.signedUrl) throw signedError || new Error('The generated voice could not be opened.');
   entry.media_url = signed.signedUrl;
-  renderConversationWorkspace();
+  if (shouldRender) renderConversationWorkspace();
 }
 
 async function playTextEntry(entry) {
-  if (!entry.media_url) {
-    try { await generateTextAudio(entry); }
+  if (!isElevenLabsReady(entry)) {
+    try { await generateTextAudio(entry, false); }
     catch (error) {
-      console.warn('Falling back to device text-to-speech', error);
-      playbackStatus.textContent = 'Using the temporary device voice. ElevenLabs audio is not ready yet.';
-      await speakTextEntry(entry);
-      return;
+      console.warn('ElevenLabs voice is not ready', error);
+      throw new Error('This ElevenLabs voice is still processing. Try again in a moment.');
     }
+    renderConversationWorkspace();
   }
   await playMediaEntry(entry);
 }
@@ -571,6 +576,7 @@ async function loadConversationWorkspace() {
   }));
   workspaceMessage.textContent = '';
   renderConversationWorkspace();
+  preparePendingTextAudio();
 }
 
 async function showConversationDetail(conversationId) {
