@@ -30,7 +30,7 @@ Deno.serve(async (req) => {
     if (entry.kind !== 'text' || !entry.text_body) {
       return Response.json({ error: 'This entry is not a typed response.' }, { status: 400, headers: corsHeaders });
     }
-    if (entry.storage_path?.endsWith('-timed.mp3') && entry.tts_alignment) {
+    if (entry.storage_path?.endsWith('-timed.mp3') && Array.isArray(entry.tts_alignment) && entry.tts_alignment.length > 0) {
       return Response.json({ storage_bucket: entry.storage_bucket, storage_path: entry.storage_path, tts_alignment: entry.tts_alignment }, { headers: corsHeaders });
     }
 

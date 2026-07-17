@@ -448,9 +448,12 @@ function speakTextEntry(entry) {
 
 async function generateTextAudio(entry) {
   playbackStatus.textContent = `Preparing ${entry.profiles?.display_name || 'this participant'}'s voice…`;
-  const { data, error } = await supabase.functions.invoke('generate-text-audio', { body: { entry_id: entry.id } });
+  const invocation = supabase.functions.invoke('generate-text-audio', { body: { entry_id: entry.id } });
+  const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('Voice timing took too long. Please try playing it again.')), 30000));
+  const { data, error } = await Promise.race([invocation, timeout]);
   if (error) throw error;
   if (data?.error) throw new Error(data.error);
+  if (!data?.tts_alignment?.length) throw new Error('The voice was created, but synchronized word timing was empty. Please try again.');
   entry.storage_bucket = data.storage_bucket;
   entry.storage_path = data.storage_path;
   entry.tts_alignment = data.tts_alignment || [];
