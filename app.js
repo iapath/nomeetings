@@ -378,14 +378,14 @@ function isElevenLabsReady(entry) {
 }
 
 async function preparePendingTextAudio() {
-  if (dashboardState.voiceQueueInProgress || dashboardState.autoplayActive) return;
+  if (dashboardState.voiceQueueInProgress) return;
   dashboardState.voiceQueueInProgress = true;
   const conversationId = dashboardState.currentConversation?.id;
   let retryNeeded = false;
   const pendingEntries = dashboardState.entries.filter((entry) => entry.kind === 'text' && !isElevenLabsReady(entry));
 
   for (const entry of pendingEntries) {
-    if (dashboardState.currentConversation?.id !== conversationId || dashboardState.autoplayActive) break;
+    if (dashboardState.currentConversation?.id !== conversationId) break;
     entry.voiceGenerationInProgress = true;
     if (!dashboardState.autoplayActive) renderConversationWorkspace();
     try {
@@ -400,6 +400,7 @@ async function preparePendingTextAudio() {
   }
 
   dashboardState.voiceQueueInProgress = false;
+  if (!dashboardState.autoplayActive) renderConversationWorkspace();
   if (retryNeeded && !dashboardState.voiceRefreshTimer) {
     dashboardState.voiceRefreshTimer = window.setTimeout(async () => {
       dashboardState.voiceRefreshTimer = null;
