@@ -322,6 +322,11 @@ function closeConversationDialog() {
 }
 
 function renderConversationWorkspace() {
+  dashboardState.entries.forEach((entry) => {
+    if (entry.kind === 'text' && entry.text_body && !entry.tts_alignment?.length) {
+      entry.tts_alignment = estimateWordTiming(entry.text_body, entry.duration_seconds);
+    }
+  });
   document.querySelector('#agendaCount').textContent = `${dashboardState.agenda.length} item${dashboardState.agenda.length === 1 ? '' : 's'}`;
   document.querySelector('#participantCount').textContent = `${dashboardState.participants.length + dashboardState.invites.filter((invite) => !invite.accepted_at).length} people`;
   document.querySelector('#entryCount').textContent = `${dashboardState.entries.length} response${dashboardState.entries.length === 1 ? '' : 's'}`;
@@ -355,24 +360,6 @@ function renderConversationWorkspace() {
 
   workspaceEntries.querySelectorAll('[data-entry-media]').forEach((media) => {
     const timedEntry = dashboardState.entries.find((item) => item.id === media.dataset.entryMedia);
-    media.addEventListener('play', async () => {
-      const needsTimedUpgrade = timedEntry?.kind === 'text'
-        && (!timedEntry.storage_path?.endsWith('-timed.mp3') || !timedEntry.tts_alignment?.length);
-      if (!needsTimedUpgrade || timedEntry.timingUpgradeInProgress) return;
-      timedEntry.timingUpgradeInProgress = true;
-      media.pause();
-      workspaceMessage.textContent = 'Preparing synchronized word timing…';
-      try {
-        await generateTextAudio(timedEntry);
-        workspaceMessage.textContent = '';
-        const upgradedMedia = workspaceEntries.querySelector(`[data-entry-media="${timedEntry.id}"]`);
-        if (upgradedMedia) await upgradedMedia.play();
-      } catch (error) {
-        timedEntry.timingUpgradeInProgress = false;
-        workspaceMessage.textContent = `Could not prepare word highlighting: ${error.message}`;
-        await media.play();
-      }
-    });
     if (timedEntry?.tts_alignment?.length) {
       media.addEventListener('timeupdate', () => updateSpokenWord(timedEntry, media.currentTime));
       media.addEventListener('ended', () => updateSpokenWord(timedEntry, -1));
@@ -383,6 +370,19 @@ function renderConversationWorkspace() {
       if (entry && !dashboardState.autoplayActive) await markEntryComplete(entry);
       if (!dashboardState.autoplayActive && participant?.role !== 'host' && entry?.author_id !== dashboardState.user.id) responsePromptDialog.showModal();
     });
+  });
+}
+
+function estimateWordTiming(text, durationSeconds) {
+  const words = text.trim().split(/\s+/).filter(Boolean);
+  const characterTotal = words.reduce((total, word) => total + word.length, 0) || 1;
+  const availableDuration = Math.max(1.2, Number(durationSeconds) || characterTotal / 14);
+  let cursor = .25;
+  return words.map((word) => {
+    const duration = Math.max(.12, availableDuration * (word.length / characterTotal));
+    const timing = { text: word, start: cursor, end: cursor + duration };
+    cursor += duration;
+    return timing;
   });
 }
 
@@ -464,8 +464,7 @@ async function generateTextAudio(entry) {
 }
 
 async function playTextEntry(entry) {
-  const needsTimedAudio = !entry.storage_path?.endsWith('-timed.mp3') || !entry.tts_alignment?.length;
-  if (!entry.media_url || needsTimedAudio) {
+  if (!entry.media_url) {
     try { await generateTextAudio(entry); }
     catch (error) {
       console.warn('Falling back to device text-to-speech', error);
