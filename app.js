@@ -374,7 +374,7 @@ function renderConversationWorkspace() {
 }
 
 function isElevenLabsReady(entry) {
-  return entry.kind !== 'text' || Boolean(entry.media_url && entry.storage_path?.endsWith('-timed.mp3') && entry.tts_alignment?.length);
+  return entry.kind !== 'text' || Boolean(entry.media_url);
 }
 
 async function preparePendingTextAudio() {
