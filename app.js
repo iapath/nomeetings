@@ -354,7 +354,7 @@ function renderConversationWorkspace() {
   workspaceEntries.innerHTML = dashboardState.entries.length ? dashboardState.entries.map((entry, index) => `
     <article class="workspace-row ${dashboardState.watchProgress.get(entry.id)?.completed ? 'watched' : ''}" data-entry-row="${entry.id}">
       <span class="entry-kind">${escapeHTML(entry.kind)}</span>
-      <div><div class="identity-line">${avatarMarkup(entry.profiles)}<h4>${escapeHTML(entry.profiles?.display_name || entry.profiles?.email || 'Participant')}</h4></div>${entry.text_body ? `<p class="spoken-text" data-spoken-text="${entry.id}">${entry.tts_alignment?.length ? entry.tts_alignment.map((word, wordIndex) => `<span data-spoken-word="${wordIndex}">${escapeHTML(word.text)}</span>`).join(' ') : escapeHTML(entry.text_body)}</p>` : `<p>${entry.status === 'ready' ? 'Clip uploaded and ready.' : escapeHTML(entry.status)}</p>`}${entry.media_url ? `<${entry.kind === 'video' ? 'video' : 'audio'} class="entry-media" controls preload="auto" data-entry-media="${entry.id}" src="${escapeHTML(entry.media_url)}"></${entry.kind === 'video' ? 'video' : 'audio'}>` : ''}</div>
+      <div><div class="identity-line">${avatarMarkup(entry.profiles)}<h4>${escapeHTML(entry.profiles?.display_name || entry.profiles?.email || 'Participant')}</h4></div>${entry.text_body ? `<p class="spoken-text" data-spoken-text="${entry.id}">${entry.tts_alignment?.length ? entry.tts_alignment.map((word, wordIndex) => `<span data-spoken-word="${wordIndex}">${escapeHTML(word.text)}</span>`).join(' ') : escapeHTML(entry.text_body)}</p>` : `<p>${entry.status === 'ready' ? 'Clip uploaded and ready.' : escapeHTML(entry.status)}</p>`}${entry.media_url ? `<${entry.kind === 'video' ? 'video' : 'audio'} class="entry-media" controls preload="auto" data-entry-media="${entry.id}" src="${escapeHTML(entry.media_url)}"></${entry.kind === 'video' ? 'video' : 'audio'}>` : entry.kind === 'text' ? `<div class="voice-missing"><button class="ghost" type="button" data-generate-voice="${entry.id}">Generate ElevenLabs voice</button><span data-voice-error="${entry.id}">No saved audio yet.</span></div>` : ''}</div>
       <div class="workspace-row-meta"><span class="watch-state">${dashboardState.watchProgress.get(entry.id)?.completed ? '✓ Played' : 'New'}</span><span>${escapeHTML(formatDate(entry.created_at))}</span><button class="ghost play-from-entry" type="button" data-play-index="${index}">Play from here</button></div>
     </article>`).join('') : '<div class="empty-inline">No responses yet. Upload a clip, record one, or write an update.</div>';
 
@@ -892,7 +892,7 @@ textResponseForm.addEventListener('submit', async (event) => {
     const { data: voiceData, error: voiceError } = await supabase.functions.invoke('generate-text-audio', { body: { entry_id: savedEntry.id } });
     await loadConversationWorkspace();
     workspaceMessage.textContent = voiceError || voiceData?.error
-      ? 'Response posted. Its generated voice is pending, so playback will temporarily use the device voice.'
+      ? `Response posted, but ElevenLabs failed: ${voiceError?.message || voiceData?.error}`
       : 'Response posted and voice audio is ready.';
   }
 });
@@ -915,6 +915,21 @@ playNewButton.addEventListener('click', () => {
 playAllButton.addEventListener('click', () => playConversationEntries(dashboardState.entries));
 stopPlaybackButton.addEventListener('click', () => stopContinuousPlayback());
 workspaceEntries.addEventListener('click', (event) => {
+  const voiceButton = event.target.closest('[data-generate-voice]');
+  if (voiceButton) {
+    const entry = dashboardState.entries.find((item) => item.id === voiceButton.dataset.generateVoice);
+    if (!entry) return;
+    const status = workspaceEntries.querySelector(`[data-voice-error="${entry.id}"]`);
+    voiceButton.disabled = true;
+    voiceButton.textContent = 'Generating…';
+    if (status) status.textContent = 'Contacting ElevenLabs and saving the MP3…';
+    generateTextAudio(entry).catch((error) => {
+      voiceButton.disabled = false;
+      voiceButton.textContent = 'Try ElevenLabs again';
+      if (status) status.textContent = error.message;
+    });
+    return;
+  }
   const button = event.target.closest('[data-play-index]');
   if (!button) return;
   playConversationEntries(dashboardState.entries.slice(Number(button.dataset.playIndex)));
