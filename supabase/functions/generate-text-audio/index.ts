@@ -36,9 +36,10 @@ Deno.serve(async (req) => {
 
     const { data: profile } = await userClient.from('profiles').select('tts_voice').eq('id', entry.author_id).single();
     const voiceId = profile?.tts_voice || Deno.env.get('ELEVENLABS_DEFAULT_VOICE_ID') || 'JBFqnCBsd6RMkjVDRZzb';
-    const speechResponse = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}/with-timestamps?output_format=mp3_44100_128`, {
+    const speechResponse = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}?output_format=mp3_44100_128`, {
       method: 'POST',
       headers: { 'xi-api-key': apiKey, 'Content-Type': 'application/json' },
+      signal: AbortSignal.timeout(45000),
       body: JSON.stringify({
         text: `<break time="0.45s" />${entry.text_body}<break time="0.65s" />`,
         model_id: 'eleven_multilingual_v2',
@@ -47,39 +48,17 @@ Deno.serve(async (req) => {
     });
     if (!speechResponse.ok) throw new Error(`ElevenLabs generation failed (${speechResponse.status}): ${(await speechResponse.text()).slice(0, 240)}`);
 
-    const speech = await speechResponse.json();
-    const audio = Uint8Array.from(atob(speech.audio_base64), (character) => character.charCodeAt(0));
-    const sourceAlignment = speech.alignment || speech.normalized_alignment;
+    const audio = new Uint8Array(await speechResponse.arrayBuffer());
     const words: Array<{ text: string; start: number; end: number }> = [];
-    let current = '';
-    let start = 0;
-    let end = 0;
-    let insideTag = false;
-    (sourceAlignment?.characters || []).forEach((character: string, index: number) => {
-      if (character === '<') { insideTag = true; return; }
-      if (insideTag) { if (character === '>') insideTag = false; return; }
-      const characterStart = sourceAlignment.character_start_times_seconds[index] || 0;
-      const characterEnd = sourceAlignment.character_end_times_seconds[index] || characterStart;
-      if (/\s/.test(character)) {
-        if (current) { words.push({ text: current, start, end }); current = ''; }
-        return;
-      }
-      if (!current) start = characterStart;
-      current += character;
-      end = characterEnd;
+    const fallbackWords = entry.text_body.trim().split(/\s+/).filter(Boolean);
+    const characterTotal = fallbackWords.reduce((total: number, word: string) => total + word.length, 0) || 1;
+    const estimatedSpeechSeconds = Math.max(1.2, characterTotal / 14);
+    let cursor = .45;
+    fallbackWords.forEach((word: string) => {
+      const duration = Math.max(.12, estimatedSpeechSeconds * (word.length / characterTotal));
+      words.push({ text: word, start: cursor, end: cursor + duration });
+      cursor += duration;
     });
-    if (current) words.push({ text: current, start, end });
-    if (!words.length) {
-      const fallbackWords = entry.text_body.trim().split(/\s+/).filter(Boolean);
-      const characterTotal = fallbackWords.reduce((total: number, word: string) => total + word.length, 0) || 1;
-      const estimatedSpeechSeconds = Math.max(1.2, characterTotal / 14);
-      let cursor = .45;
-      fallbackWords.forEach((word: string) => {
-        const duration = Math.max(.12, estimatedSpeechSeconds * (word.length / characterTotal));
-        words.push({ text: word, start: cursor, end: cursor + duration });
-        cursor += duration;
-      });
-    }
     const storagePath = `${entry.conversation_id}/${entry.author_id}/tts/${entry.id}-timed.mp3`;
     const { error: uploadError } = await adminClient.storage.from('conversation-clips').upload(storagePath, audio, {
       contentType: 'audio/mpeg', cacheControl: '31536000', upsert: true,
