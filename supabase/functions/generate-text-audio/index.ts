@@ -30,7 +30,7 @@ Deno.serve(async (req) => {
     if (entry.kind !== 'text' || !entry.text_body) {
       return Response.json({ error: 'This entry is not a typed response.' }, { status: 400, headers: corsHeaders });
     }
-    if (entry.storage_path) {
+    if (entry.storage_path?.endsWith('-padded.mp3')) {
       return Response.json({ storage_bucket: entry.storage_bucket, storage_path: entry.storage_path }, { headers: corsHeaders });
     }
 
@@ -40,7 +40,7 @@ Deno.serve(async (req) => {
       method: 'POST',
       headers: { 'xi-api-key': apiKey, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        text: entry.text_body,
+        text: `<break time="0.45s" />${entry.text_body}<break time="0.65s" />`,
         model_id: 'eleven_multilingual_v2',
         voice_settings: { stability: 0.55, similarity_boost: 0.8, style: 0.15, use_speaker_boost: true, speed: 1.0 },
       }),
@@ -48,7 +48,7 @@ Deno.serve(async (req) => {
     if (!speechResponse.ok) throw new Error(`ElevenLabs generation failed (${speechResponse.status}): ${(await speechResponse.text()).slice(0, 240)}`);
 
     const audio = new Uint8Array(await speechResponse.arrayBuffer());
-    const storagePath = `${entry.conversation_id}/${entry.author_id}/tts/${entry.id}.mp3`;
+    const storagePath = `${entry.conversation_id}/${entry.author_id}/tts/${entry.id}-padded.mp3`;
     const { error: uploadError } = await adminClient.storage.from('conversation-clips').upload(storagePath, audio, {
       contentType: 'audio/mpeg', cacheControl: '31536000', upsert: true,
     });

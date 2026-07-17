@@ -427,7 +427,8 @@ async function generateTextAudio(entry) {
 }
 
 async function playTextEntry(entry) {
-  if (!entry.media_url) {
+  const needsPaddedAudio = !entry.storage_path?.endsWith('-padded.mp3');
+  if (!entry.media_url || needsPaddedAudio) {
     try { await generateTextAudio(entry); }
     catch (error) {
       console.warn('Falling back to device text-to-speech', error);
@@ -448,12 +449,22 @@ function playMediaEntry(entry) {
     }
     dashboardState.currentMedia = media;
     dashboardState.playbackResolve = resolve;
-    const finish = () => { media.removeEventListener('ended', finish); media.removeEventListener('error', fail); resolve(); };
+    const finish = () => {
+      media.removeEventListener('ended', finish);
+      media.removeEventListener('error', fail);
+      window.setTimeout(resolve, 250);
+    };
     const fail = () => { media.removeEventListener('ended', finish); media.removeEventListener('error', fail); reject(new Error('This recording could not be played.')); };
     media.addEventListener('ended', finish);
     media.addEventListener('error', fail);
     media.currentTime = 0;
-    try { await media.play(); } catch (error) { fail(); }
+    try {
+      if (media.readyState < HTMLMediaElement.HAVE_FUTURE_DATA) {
+        await new Promise((readyResolve) => media.addEventListener('canplay', readyResolve, { once: true }));
+      }
+      await new Promise((readyResolve) => window.setTimeout(readyResolve, 180));
+      await media.play();
+    } catch (error) { fail(); }
   });
 }
 
