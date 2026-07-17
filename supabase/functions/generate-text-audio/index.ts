@@ -69,6 +69,17 @@ Deno.serve(async (req) => {
       end = characterEnd;
     });
     if (current) words.push({ text: current, start, end });
+    if (!words.length) {
+      const fallbackWords = entry.text_body.trim().split(/\s+/).filter(Boolean);
+      const characterTotal = fallbackWords.reduce((total: number, word: string) => total + word.length, 0) || 1;
+      const estimatedSpeechSeconds = Math.max(1.2, characterTotal / 14);
+      let cursor = .45;
+      fallbackWords.forEach((word: string) => {
+        const duration = Math.max(.12, estimatedSpeechSeconds * (word.length / characterTotal));
+        words.push({ text: word, start: cursor, end: cursor + duration });
+        cursor += duration;
+      });
+    }
     const storagePath = `${entry.conversation_id}/${entry.author_id}/tts/${entry.id}-timed.mp3`;
     const { error: uploadError } = await adminClient.storage.from('conversation-clips').upload(storagePath, audio, {
       contentType: 'audio/mpeg', cacheControl: '31536000', upsert: true,

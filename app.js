@@ -355,6 +355,24 @@ function renderConversationWorkspace() {
 
   workspaceEntries.querySelectorAll('[data-entry-media]').forEach((media) => {
     const timedEntry = dashboardState.entries.find((item) => item.id === media.dataset.entryMedia);
+    media.addEventListener('play', async () => {
+      const needsTimedUpgrade = timedEntry?.kind === 'text'
+        && (!timedEntry.storage_path?.endsWith('-timed.mp3') || !timedEntry.tts_alignment?.length);
+      if (!needsTimedUpgrade || timedEntry.timingUpgradeInProgress) return;
+      timedEntry.timingUpgradeInProgress = true;
+      media.pause();
+      workspaceMessage.textContent = 'Preparing synchronized word timing…';
+      try {
+        await generateTextAudio(timedEntry);
+        workspaceMessage.textContent = '';
+        const upgradedMedia = workspaceEntries.querySelector(`[data-entry-media="${timedEntry.id}"]`);
+        if (upgradedMedia) await upgradedMedia.play();
+      } catch (error) {
+        timedEntry.timingUpgradeInProgress = false;
+        workspaceMessage.textContent = `Could not prepare word highlighting: ${error.message}`;
+        await media.play();
+      }
+    });
     if (timedEntry?.tts_alignment?.length) {
       media.addEventListener('timeupdate', () => updateSpokenWord(timedEntry, media.currentTime));
       media.addEventListener('ended', () => updateSpokenWord(timedEntry, -1));
