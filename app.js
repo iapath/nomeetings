@@ -349,11 +349,16 @@ function renderConversationWorkspace() {
   workspaceEntries.innerHTML = dashboardState.entries.length ? dashboardState.entries.map((entry, index) => `
     <article class="workspace-row ${dashboardState.watchProgress.get(entry.id)?.completed ? 'watched' : ''}" data-entry-row="${entry.id}">
       <span class="entry-kind">${escapeHTML(entry.kind)}</span>
-      <div><div class="identity-line">${avatarMarkup(entry.profiles)}<h4>${escapeHTML(entry.profiles?.display_name || entry.profiles?.email || 'Participant')}</h4></div>${entry.text_body ? `<p>${escapeHTML(entry.text_body)}</p>` : `<p>${entry.status === 'ready' ? 'Clip uploaded and ready.' : escapeHTML(entry.status)}</p>`}${entry.media_url ? `<${entry.kind === 'video' ? 'video' : 'audio'} class="entry-media" controls data-entry-media="${entry.id}" src="${escapeHTML(entry.media_url)}"></${entry.kind === 'video' ? 'video' : 'audio'}>` : ''}</div>
+      <div><div class="identity-line">${avatarMarkup(entry.profiles)}<h4>${escapeHTML(entry.profiles?.display_name || entry.profiles?.email || 'Participant')}</h4></div>${entry.text_body ? `<p class="spoken-text" data-spoken-text="${entry.id}">${entry.tts_alignment?.length ? entry.tts_alignment.map((word, wordIndex) => `<span data-spoken-word="${wordIndex}">${escapeHTML(word.text)}</span>`).join(' ') : escapeHTML(entry.text_body)}</p>` : `<p>${entry.status === 'ready' ? 'Clip uploaded and ready.' : escapeHTML(entry.status)}</p>`}${entry.media_url ? `<${entry.kind === 'video' ? 'video' : 'audio'} class="entry-media" controls data-entry-media="${entry.id}" src="${escapeHTML(entry.media_url)}"></${entry.kind === 'video' ? 'video' : 'audio'}>` : ''}</div>
       <div class="workspace-row-meta"><span class="watch-state">${dashboardState.watchProgress.get(entry.id)?.completed ? '✓ Played' : 'New'}</span><span>${escapeHTML(formatDate(entry.created_at))}</span><button class="ghost play-from-entry" type="button" data-play-index="${index}">Play from here</button></div>
     </article>`).join('') : '<div class="empty-inline">No responses yet. Upload a clip, record one, or write an update.</div>';
 
   workspaceEntries.querySelectorAll('[data-entry-media]').forEach((media) => {
+    const timedEntry = dashboardState.entries.find((item) => item.id === media.dataset.entryMedia);
+    if (timedEntry?.tts_alignment?.length) {
+      media.addEventListener('timeupdate', () => updateSpokenWord(timedEntry, media.currentTime));
+      media.addEventListener('ended', () => updateSpokenWord(timedEntry, -1));
+    }
     media.addEventListener('ended', async () => {
       const participant = dashboardState.participants.find((item) => item.user_id === dashboardState.user.id);
       const entry = dashboardState.entries.find((item) => item.id === media.dataset.entryMedia);
@@ -361,6 +366,13 @@ function renderConversationWorkspace() {
       if (!dashboardState.autoplayActive && participant?.role !== 'host' && entry?.author_id !== dashboardState.user.id) responsePromptDialog.showModal();
     });
   });
+}
+
+function updateSpokenWord(entry, currentTime) {
+  const text = workspaceEntries.querySelector(`[data-spoken-text="${entry.id}"]`);
+  if (!text) return;
+  const activeIndex = currentTime < 0 ? -1 : entry.tts_alignment.findIndex((word) => currentTime >= word.start && currentTime <= word.end);
+  text.querySelectorAll('[data-spoken-word]').forEach((word, index) => word.classList.toggle('speaking', index === activeIndex));
 }
 
 async function markEntryComplete(entry) {
@@ -420,6 +432,7 @@ async function generateTextAudio(entry) {
   if (data?.error) throw new Error(data.error);
   entry.storage_bucket = data.storage_bucket;
   entry.storage_path = data.storage_path;
+  entry.tts_alignment = data.tts_alignment || [];
   const { data: signed, error: signedError } = await supabase.storage.from(data.storage_bucket).createSignedUrl(data.storage_path, 3600);
   if (signedError || !signed?.signedUrl) throw signedError || new Error('The generated voice could not be opened.');
   entry.media_url = signed.signedUrl;
@@ -427,8 +440,8 @@ async function generateTextAudio(entry) {
 }
 
 async function playTextEntry(entry) {
-  const needsPaddedAudio = !entry.storage_path?.endsWith('-padded.mp3');
-  if (!entry.media_url || needsPaddedAudio) {
+  const needsTimedAudio = !entry.storage_path?.endsWith('-timed.mp3') || !entry.tts_alignment?.length;
+  if (!entry.media_url || needsTimedAudio) {
     try { await generateTextAudio(entry); }
     catch (error) {
       console.warn('Falling back to device text-to-speech', error);
@@ -509,7 +522,7 @@ async function loadConversationWorkspace() {
     supabase.from('agenda_items').select('*').eq('conversation_id', conversationId).order('position'),
     supabase.from('conversation_participants').select('user_id,role,response_required,response_status,created_at,profiles!conversation_participants_user_id_fkey(email,display_name,avatar_url,tts_voice)').eq('conversation_id', conversationId).order('created_at'),
     supabase.from('conversation_invites').select('id,email,role,response_required,accepted_at,created_at').eq('conversation_id', conversationId).order('created_at'),
-    supabase.from('conversation_entries').select('id,author_id,kind,status,storage_bucket,storage_path,text_body,duration_seconds,size_bytes,created_at,profiles!conversation_entries_author_id_fkey(email,display_name,avatar_url,tts_voice)').eq('conversation_id', conversationId).order('created_at', { ascending: true }),
+    supabase.from('conversation_entries').select('id,author_id,kind,status,storage_bucket,storage_path,text_body,tts_alignment,duration_seconds,size_bytes,created_at,profiles!conversation_entries_author_id_fkey(email,display_name,avatar_url,tts_voice)').eq('conversation_id', conversationId).order('created_at', { ascending: true }),
     supabase.from('watch_progress').select('entry_id,last_watched_seconds,completed,skipped,updated_at').eq('user_id', dashboardState.user.id),
   ]);
   const error = agendaResult.error || participantResult.error || inviteResult.error || entryResult.error || progressResult.error;
