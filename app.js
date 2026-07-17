@@ -371,7 +371,10 @@ function renderConversationWorkspace() {
 function updateSpokenWord(entry, currentTime) {
   const text = workspaceEntries.querySelector(`[data-spoken-text="${entry.id}"]`);
   if (!text) return;
-  const activeIndex = currentTime < 0 ? -1 : entry.tts_alignment.findIndex((word) => currentTime >= word.start && currentTime <= word.end);
+  const activeIndex = currentTime < 0 ? -1 : entry.tts_alignment.findIndex((word, index) => {
+    const nextStart = entry.tts_alignment[index + 1]?.start ?? word.end + .2;
+    return currentTime >= word.start && currentTime < nextStart;
+  });
   text.querySelectorAll('[data-spoken-word]').forEach((word, index) => word.classList.toggle('speaking', index === activeIndex));
 }
 
@@ -462,9 +465,16 @@ function playMediaEntry(entry) {
     }
     dashboardState.currentMedia = media;
     dashboardState.playbackResolve = resolve;
+    let highlightFrame = null;
+    const followWords = () => {
+      if (entry.tts_alignment?.length) updateSpokenWord(entry, media.currentTime);
+      if (!media.paused && !media.ended) highlightFrame = window.requestAnimationFrame(followWords);
+    };
     const finish = () => {
       media.removeEventListener('ended', finish);
       media.removeEventListener('error', fail);
+      if (highlightFrame) window.cancelAnimationFrame(highlightFrame);
+      if (entry.tts_alignment?.length) updateSpokenWord(entry, -1);
       window.setTimeout(resolve, 250);
     };
     const fail = () => { media.removeEventListener('ended', finish); media.removeEventListener('error', fail); reject(new Error('This recording could not be played.')); };
@@ -477,6 +487,7 @@ function playMediaEntry(entry) {
       }
       await new Promise((readyResolve) => window.setTimeout(readyResolve, 180));
       await media.play();
+      followWords();
     } catch (error) { fail(); }
   });
 }
@@ -546,12 +557,15 @@ async function showConversationDetail(conversationId) {
   const conversation = dashboardState.conversations.find((item) => item.id === conversationId);
   if (!conversation) return;
   dashboardState.currentConversation = conversation;
+  const conversationUrl = new URL(window.location.href);
+  conversationUrl.searchParams.set('conversation', conversationId);
+  window.history.replaceState({ conversationId }, '', conversationUrl);
   document.querySelector('#detailStatus').textContent = conversation.status;
   document.querySelector('#detailTitle').textContent = conversation.title;
   document.querySelector('#detailDescription').textContent = conversation.description || 'No description yet.';
   document.querySelector('#detailDue').textContent = `Due ${formatDate(conversation.due_at)}`;
   document.querySelector('#detailCreated').textContent = `Created ${formatDate(conversation.created_at, 'today')}`;
-  conversationDetailDialog.showModal();
+  if (!conversationDetailDialog.open) conversationDetailDialog.showModal();
   try {
     await loadConversationWorkspace();
   } catch (error) {
@@ -660,6 +674,8 @@ async function refreshSession() {
   if (user) {
     try {
       await loadDashboard(user);
+      const requestedConversation = new URL(window.location.href).searchParams.get('conversation');
+      if (requestedConversation) await showConversationDetail(requestedConversation);
     } catch (error) {
       console.error('Could not load dashboard', error);
     }
@@ -805,6 +821,10 @@ document.querySelector('#cancelConversationForm').addEventListener('click', clos
 document.querySelector('#closeDetail').addEventListener('click', () => {
   if (dashboardState.autoplayActive) stopContinuousPlayback();
   conversationDetailDialog.close();
+  dashboardState.currentConversation = null;
+  const dashboardUrl = new URL(window.location.href);
+  dashboardUrl.searchParams.delete('conversation');
+  window.history.replaceState({}, '', dashboardUrl);
 });
 
 agendaForm.addEventListener('submit', async (event) => {
