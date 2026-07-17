@@ -354,7 +354,7 @@ function renderConversationWorkspace() {
   workspaceEntries.innerHTML = dashboardState.entries.length ? dashboardState.entries.map((entry, index) => `
     <article class="workspace-row ${dashboardState.watchProgress.get(entry.id)?.completed ? 'watched' : ''}" data-entry-row="${entry.id}">
       <span class="entry-kind">${escapeHTML(entry.kind)}</span>
-      <div><div class="identity-line">${avatarMarkup(entry.profiles)}<h4>${escapeHTML(entry.profiles?.display_name || entry.profiles?.email || 'Participant')}</h4></div>${entry.text_body ? `<p class="spoken-text" data-spoken-text="${entry.id}">${entry.tts_alignment?.length ? entry.tts_alignment.map((word, wordIndex) => `<span data-spoken-word="${wordIndex}">${escapeHTML(word.text)}</span>`).join(' ') : escapeHTML(entry.text_body)}</p>` : `<p>${entry.status === 'ready' ? 'Clip uploaded and ready.' : escapeHTML(entry.status)}</p>`}${entry.kind === 'text' && !isElevenLabsReady(entry) ? `<div class="voice-processing"><span></span>${entry.voiceGenerationInProgress ? 'Generating and saving ElevenLabs voice…' : 'Queued for ElevenLabs…'}</div>` : entry.media_url ? `<${entry.kind === 'video' ? 'video' : 'audio'} class="entry-media" controls preload="auto" data-entry-media="${entry.id}" src="${escapeHTML(entry.media_url)}"></${entry.kind === 'video' ? 'video' : 'audio'}>` : ''}</div>
+      <div><div class="identity-line">${avatarMarkup(entry.profiles)}<h4>${escapeHTML(entry.profiles?.display_name || entry.profiles?.email || 'Participant')}</h4></div>${entry.text_body ? `<p class="spoken-text" data-spoken-text="${entry.id}">${entry.tts_alignment?.length ? entry.tts_alignment.map((word, wordIndex) => `<span data-spoken-word="${wordIndex}">${escapeHTML(word.text)}</span>`).join(' ') : escapeHTML(entry.text_body)}</p>` : `<p>${entry.status === 'ready' ? 'Clip uploaded and ready.' : escapeHTML(entry.status)}</p>`}${entry.media_url ? `<${entry.kind === 'video' ? 'video' : 'audio'} class="entry-media" controls preload="auto" data-entry-media="${entry.id}" src="${escapeHTML(entry.media_url)}"></${entry.kind === 'video' ? 'video' : 'audio'}>` : ''}</div>
       <div class="workspace-row-meta"><span class="watch-state">${dashboardState.watchProgress.get(entry.id)?.completed ? '✓ Played' : 'New'}</span><span>${escapeHTML(formatDate(entry.created_at))}</span><button class="ghost play-from-entry" type="button" data-play-index="${index}">Play from here</button></div>
     </article>`).join('') : '<div class="empty-inline">No responses yet. Upload a clip, record one, or write an update.</div>';
 
@@ -371,42 +371,6 @@ function renderConversationWorkspace() {
       if (!dashboardState.autoplayActive && participant?.role !== 'host' && entry?.author_id !== dashboardState.user.id) responsePromptDialog.showModal();
     });
   });
-}
-
-function isElevenLabsReady(entry) {
-  return entry.kind !== 'text' || Boolean(entry.media_url);
-}
-
-async function preparePendingTextAudio() {
-  if (dashboardState.voiceQueueInProgress) return;
-  dashboardState.voiceQueueInProgress = true;
-  const conversationId = dashboardState.currentConversation?.id;
-  let retryNeeded = false;
-  const pendingEntries = dashboardState.entries.filter((entry) => entry.kind === 'text' && !isElevenLabsReady(entry));
-
-  for (const entry of pendingEntries) {
-    if (dashboardState.currentConversation?.id !== conversationId) break;
-    entry.voiceGenerationInProgress = true;
-    if (!dashboardState.autoplayActive) renderConversationWorkspace();
-    try {
-      await generateTextAudio(entry, false);
-    } catch (error) {
-      retryNeeded = true;
-      console.warn('ElevenLabs voice generation will be retried', error);
-    } finally {
-      entry.voiceGenerationInProgress = false;
-      if (!dashboardState.autoplayActive) renderConversationWorkspace();
-    }
-  }
-
-  dashboardState.voiceQueueInProgress = false;
-  if (!dashboardState.autoplayActive) renderConversationWorkspace();
-  if (retryNeeded && !dashboardState.voiceRefreshTimer) {
-    dashboardState.voiceRefreshTimer = window.setTimeout(async () => {
-      dashboardState.voiceRefreshTimer = null;
-      if (dashboardState.currentConversation?.id === conversationId && !dashboardState.autoplayActive) await loadConversationWorkspace();
-    }, 15000);
-  }
 }
 
 function estimateWordTiming(text, durationSeconds) {
@@ -462,7 +426,6 @@ function stopContinuousPlayback(message = 'Playback stopped.') {
   playAllButton.disabled = false;
   stopPlaybackButton.disabled = true;
   playbackStatus.textContent = message;
-  window.setTimeout(() => preparePendingTextAudio(), 500);
 }
 
 async function generateTextAudio(entry, shouldRender = true) {
@@ -472,10 +435,9 @@ async function generateTextAudio(entry, shouldRender = true) {
   const { data, error } = await Promise.race([invocation, timeout]);
   if (error) throw error;
   if (data?.error) throw new Error(data.error);
-  if (!data?.tts_alignment?.length) throw new Error('The voice was created, but synchronized word timing was empty. Please try again.');
   entry.storage_bucket = data.storage_bucket;
   entry.storage_path = data.storage_path;
-  entry.tts_alignment = data.tts_alignment || [];
+  if (data.tts_alignment?.length) entry.tts_alignment = data.tts_alignment;
   const { data: signed, error: signedError } = await supabase.storage.from(data.storage_bucket).createSignedUrl(data.storage_path, 3600);
   if (signedError || !signed?.signedUrl) throw signedError || new Error('The generated voice could not be opened.');
   entry.media_url = signed.signedUrl;
@@ -483,7 +445,7 @@ async function generateTextAudio(entry, shouldRender = true) {
 }
 
 async function playTextEntry(entry) {
-  if (!isElevenLabsReady(entry)) {
+  if (!entry.media_url) {
     try { await generateTextAudio(entry, false); }
     catch (error) {
       console.warn('ElevenLabs voice is not ready', error);
@@ -592,7 +554,6 @@ async function loadConversationWorkspace() {
   }));
   workspaceMessage.textContent = '';
   renderConversationWorkspace();
-  preparePendingTextAudio();
 }
 
 async function showConversationDetail(conversationId) {

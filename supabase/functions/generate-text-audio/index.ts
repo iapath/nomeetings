@@ -30,7 +30,7 @@ Deno.serve(async (req) => {
     if (entry.kind !== 'text' || !entry.text_body) {
       return Response.json({ error: 'This entry is not a typed response.' }, { status: 400, headers: corsHeaders });
     }
-    if (entry.storage_path?.endsWith('-timed.mp3') && Array.isArray(entry.tts_alignment) && entry.tts_alignment.length > 0) {
+    if (entry.storage_path?.endsWith('-padded.mp3')) {
       return Response.json({ storage_bucket: entry.storage_bucket, storage_path: entry.storage_path, tts_alignment: entry.tts_alignment }, { headers: corsHeaders });
     }
 
@@ -59,7 +59,7 @@ Deno.serve(async (req) => {
       words.push({ text: word, start: cursor, end: cursor + duration });
       cursor += duration;
     });
-    const storagePath = `${entry.conversation_id}/${entry.author_id}/tts/${entry.id}-timed.mp3`;
+    const storagePath = `${entry.conversation_id}/${entry.author_id}/tts/${entry.id}-padded.mp3`;
     const { error: uploadError } = await adminClient.storage.from('conversation-clips').upload(storagePath, audio, {
       contentType: 'audio/mpeg', cacheControl: '31536000', upsert: true,
     });
