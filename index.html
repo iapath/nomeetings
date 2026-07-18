@@ -165,6 +165,16 @@
           <div class="workspace-list" id="workspaceAgenda"></div>
         </section>
 
+        <section class="workspace-section drop-files-section">
+          <div class="workspace-section-heading"><div><span class="section-kicker">Reference material</span><h3>Files</h3></div><span id="dropFileCount">0 files</span></div>
+          <div class="drop-file-actions">
+            <label class="primary small upload-action">＋ Add file(s)<input id="dropFileInput" type="file" multiple /></label>
+            <button class="ghost" id="downloadAllFilesButton" type="button">Download all</button>
+          </div>
+          <p class="form-message" id="dropFileMessage"></p>
+          <div class="drop-file-list" id="dropFileList"></div>
+        </section>
+
         <section class="workspace-section" id="legacyParticipantsSection" hidden>
           <div class="workspace-section-heading"><div><span class="section-kicker">Bring people in</span><h3>Participants</h3></div><span id="participantCount">0 people</span></div>
           <form class="invite-builder" id="inviteForm">

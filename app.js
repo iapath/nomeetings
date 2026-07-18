@@ -1,5 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import * as tus from 'https://esm.sh/tus-js-client@4.3.1/lib.esm/browser/index.js?bundle';
+import JSZip from 'https://esm.sh/jszip@3.10.1';
 
 const SUPABASE_URL = 'https://kepkisctnlomykhyqywh.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtlcGtpc2N0bmxvbXlraHlxeXdoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQyMDQ1NjUsImV4cCI6MjA5OTc4MDU2NX0.4RbX_nDxQDQHZ-vkNvvAtdv0TkWr_km51YnTFPGIV20';
@@ -109,6 +110,11 @@ const teamInviteEmail = document.querySelector('#teamInviteEmail');
 const teamInviteButton = document.querySelector('#teamInviteButton');
 const teamMessage = document.querySelector('#teamMessage');
 const teamSeatCount = document.querySelector('#teamSeatCount');
+const dropFileInput = document.querySelector('#dropFileInput');
+const dropFileList = document.querySelector('#dropFileList');
+const dropFileCount = document.querySelector('#dropFileCount');
+const dropFileMessage = document.querySelector('#dropFileMessage');
+const downloadAllFilesButton = document.querySelector('#downloadAllFilesButton');
 if (!navigator.mediaDevices?.getDisplayMedia) {
   recordScreenButton.hidden = true;
   document.querySelector('#promptRecordScreen').hidden = true;
@@ -142,6 +148,7 @@ const dashboardState = {
   pendingSectionReview: null,
   teamMembers: [],
   teamInvites: [],
+  dropFiles: [],
 };
 
 function escapeHTML(value = '') {
@@ -697,6 +704,103 @@ async function playConversationEntries(entries) {
   }
 }
 
+function formatFileSize(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function renderDropFiles() {
+  dropFileCount.textContent = `${dashboardState.dropFiles.length} file${dashboardState.dropFiles.length === 1 ? '' : 's'}`;
+  downloadAllFilesButton.disabled = false;
+  dropFileList.innerHTML = dashboardState.dropFiles.length ? dashboardState.dropFiles.map((file) => `
+    <article class="drop-file-row">
+      <span class="drop-file-icon">${escapeHTML((file.file_name.split('.').pop() || 'file').slice(0, 4).toUpperCase())}</span>
+      <div><strong>${escapeHTML(file.file_name)}</strong><span>${formatFileSize(file.size_bytes)} · ${escapeHTML(file.profiles?.display_name || file.profiles?.email || 'Team Member')}</span></div>
+      <a class="ghost" href="${escapeHTML(file.signed_url || '#')}" target="_blank" rel="noopener" download="${escapeHTML(file.file_name)}">Download</a>
+    </article>`).join('') : '<div class="empty-inline">Add documents, spreadsheets, images, or other reference files for this Drop.</div>';
+}
+
+async function loadDropFiles() {
+  const conversationId = dashboardState.currentConversation.id;
+  const { data, error } = await supabase.from('drop_files')
+    .select('id,uploaded_by,storage_bucket,storage_path,file_name,content_type,size_bytes,created_at,profiles!drop_files_uploaded_by_fkey(email,display_name)')
+    .eq('conversation_id', conversationId).order('created_at');
+  if (error) throw error;
+  dashboardState.dropFiles = data || [];
+  await Promise.all(dashboardState.dropFiles.map(async (file) => {
+    const { data: signed } = await supabase.storage.from(file.storage_bucket).createSignedUrl(file.storage_path, 3600);
+    file.signed_url = signed?.signedUrl || null;
+  }));
+  renderDropFiles();
+}
+
+async function uploadDropFile(file, index, total) {
+  const safeName = file.name.replace(/[^a-zA-Z0-9._-]+/g, '_');
+  const path = `${dashboardState.currentConversation.id}/${dashboardState.user.id}/${crypto.randomUUID()}-${safeName}`;
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session?.access_token) throw new Error('Your sign-in session expired.');
+  await new Promise((resolve, reject) => {
+    const upload = new tus.Upload(file, {
+      endpoint: 'https://kepkisctnlomykhyqywh.storage.supabase.co/storage/v1/upload/resumable',
+      retryDelays: [0, 3000, 5000, 10000], headers: { authorization: `Bearer ${session.access_token}`, 'x-upsert': 'false' },
+      uploadDataDuringCreation: true, removeFingerprintOnSuccess: true, chunkSize: 6 * 1024 * 1024,
+      metadata: { bucketName: 'drop-files', objectName: path, contentType: file.type || 'application/octet-stream', cacheControl: '3600' },
+      onError: reject,
+      onProgress: (uploaded, bytes) => { dropFileMessage.textContent = `Uploading ${index + 1} of ${total}: ${file.name} · ${Math.round((uploaded / bytes) * 100)}%`; },
+      onSuccess: resolve,
+    });
+    upload.start();
+  });
+  const { error } = await supabase.from('drop_files').insert({
+    conversation_id: dashboardState.currentConversation.id, uploaded_by: dashboardState.user.id,
+    storage_bucket: 'drop-files', storage_path: path, file_name: file.name,
+    content_type: file.type || null, size_bytes: file.size,
+  });
+  if (error) { await supabase.storage.from('drop-files').remove([path]); throw error; }
+}
+
+function buildDropSummary() {
+  const drop = dashboardState.currentConversation;
+  const agenda = dashboardState.agenda.map((item, index) => `${index + 1}. ${item.title}${item.description ? ` — ${item.description}` : ''}`).join('\n');
+  const sections = dashboardState.sections.map((section, index) => `${index + 1}. ${section.label} (${formatElapsed(section.timestamp_seconds)}–${formatElapsed(section.end_seconds)})\n${section.summary || 'No summary available.'}`).join('\n\n');
+  return `# ${drop.title}\n\n${drop.description || 'No description.'}\n\nDue: ${formatDate(drop.due_at)}\nCreated: ${formatDate(drop.created_at)}\n\n## Agenda\n\n${agenda || 'No agenda items.'}\n\n## Drop Sections and Summary\n\n${sections || 'No recording sections have been published.'}\n`;
+}
+
+function buildDropTranscript() {
+  return dashboardState.entries.filter((entry) => entry.text_body).map((entry) => {
+    const author = entry.profiles?.display_name || entry.profiles?.email || 'Team Member';
+    return `${author} · ${entry.kind.toUpperCase()} · ${formatDate(entry.created_at)}\n${entry.text_body}`;
+  }).join('\n\n---\n\n') || 'No transcript is available yet.';
+}
+
+async function downloadAllDropFiles() {
+  downloadAllFilesButton.disabled = true;
+  dropFileMessage.textContent = 'Preparing Drop download…';
+  try {
+    const zip = new JSZip();
+    zip.file('Drop Summary.md', buildDropSummary());
+    zip.file('Drop Transcript.txt', buildDropTranscript());
+    for (let index = 0; index < dashboardState.dropFiles.length; index += 1) {
+      const file = dashboardState.dropFiles[index];
+      dropFileMessage.textContent = `Adding ${index + 1} of ${dashboardState.dropFiles.length}: ${file.file_name}`;
+      const response = await fetch(file.signed_url);
+      if (!response.ok) throw new Error(`Could not download ${file.file_name}.`);
+      zip.file(`Files/${index + 1}-${file.file_name}`, await response.blob());
+    }
+    const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url; link.download = `${dashboardState.currentConversation.title.replace(/[^a-zA-Z0-9_-]+/g, '_')}-Drop.zip`; link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    dropFileMessage.textContent = 'Download ready.';
+  } catch (error) {
+    dropFileMessage.textContent = `Could not prepare download: ${error.message}`;
+  } finally {
+    downloadAllFilesButton.disabled = false;
+  }
+}
+
 async function loadConversationWorkspace() {
   const conversationId = dashboardState.currentConversation.id;
   workspaceMessage.textContent = 'Loading agenda, participants, and responses…';
@@ -727,6 +831,7 @@ async function loadConversationWorkspace() {
     if (sectionError) console.warn('Could not load recording sections', sectionError);
     dashboardState.sections = sections || [];
   } else dashboardState.sections = [];
+  await loadDropFiles();
   workspaceMessage.textContent = '';
   renderConversationWorkspace();
 }
@@ -1278,6 +1383,22 @@ workspaceUpload.addEventListener('change', async () => {
   catch (error) { setUploadProgress(`Could not upload clip: ${error.message}`, 0); }
   finally { workspaceUpload.value = ''; }
 });
+dropFileInput.addEventListener('change', async () => {
+  const files = [...(dropFileInput.files || [])];
+  if (!files.length) return;
+  dropFileInput.disabled = true;
+  try {
+    for (let index = 0; index < files.length; index += 1) await uploadDropFile(files[index], index, files.length);
+    await loadDropFiles();
+    dropFileMessage.textContent = `${files.length} file${files.length === 1 ? '' : 's'} added to this Drop.`;
+  } catch (error) {
+    dropFileMessage.textContent = `Could not add files: ${error.message}`;
+  } finally {
+    dropFileInput.value = '';
+    dropFileInput.disabled = false;
+  }
+});
+downloadAllFilesButton.addEventListener('click', downloadAllDropFiles);
 
 recordAudioButton.addEventListener('click', () => startRecording('audio'));
 recordVideoButton.addEventListener('click', () => startRecording('video'));
