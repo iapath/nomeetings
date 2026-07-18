@@ -10,7 +10,7 @@ const demoState = {
   workspace: 'NoMeetings Internal',
   user: { name: 'Maya', email: 'maya@nomeetings.demo' },
   conversation: {
-    title: 'Monthly numbers Conversation',
+    title: 'Monthly numbers Drop',
     due: 'Friday 5:00 PM',
     status: 'active',
     maxDuration: 600,
@@ -102,6 +102,12 @@ const sectionReviewDialog = document.querySelector('#sectionReviewDialog');
 const sectionReviewList = document.querySelector('#sectionReviewList');
 const sectionReviewMessage = document.querySelector('#sectionReviewMessage');
 const publishSectionsButton = document.querySelector('#publishSectionsButton');
+const teamSettings = document.querySelector('#teamSettings');
+const teamMemberList = document.querySelector('#teamMemberList');
+const teamInviteEmail = document.querySelector('#teamInviteEmail');
+const teamInviteButton = document.querySelector('#teamInviteButton');
+const teamMessage = document.querySelector('#teamMessage');
+const teamSeatCount = document.querySelector('#teamSeatCount');
 
 const dashboardState = {
   user: null,
@@ -127,6 +133,8 @@ const dashboardState = {
   recordingSections: [],
   recordingSectionTimer: null,
   pendingSectionReview: null,
+  teamMembers: [],
+  teamInvites: [],
 };
 
 function escapeHTML(value = '') {
@@ -177,6 +185,28 @@ function renderAccountProfile() {
     profileAvatarPreview.hidden = true;
     profileAvatarFallback.hidden = false;
   }
+}
+
+function renderTeamMembers() {
+  const members = dashboardState.teamMembers;
+  teamSeatCount.textContent = `${members.length} seat${members.length === 1 ? '' : 's'}`;
+  const accepted = members.map((member) => `<article class="team-member-row">${avatarMarkup(member.profiles)}<div><strong>${escapeHTML(member.profiles?.display_name || member.profiles?.email || 'Member')}</strong><span>${escapeHTML(member.profiles?.email || '')}</span></div><em>${escapeHTML(member.role)}</em></article>`);
+  const pending = dashboardState.teamInvites.filter((invite) => !invite.accepted_at).map((invite) => `<article class="team-member-row pending"><span class="row-avatar-fallback">${escapeHTML(invite.email.charAt(0).toUpperCase())}</span><div><strong>${escapeHTML(invite.email)}</strong><span>Invitation pending</span></div><em>pending</em></article>`);
+  teamMemberList.innerHTML = [...accepted, ...pending].join('') || '<p>No Team Members yet.</p>';
+}
+
+async function loadTeamMembers() {
+  const isHost = ['owner', 'admin'].includes(dashboardState.workspace?.member_role);
+  teamSettings.hidden = !isHost;
+  if (!isHost) return;
+  const [memberResult, inviteResult] = await Promise.all([
+    supabase.from('workspace_members').select('user_id,role,created_at,profiles!workspace_members_user_id_fkey(email,display_name,avatar_url)').eq('workspace_id', dashboardState.workspace.workspace_id).order('created_at'),
+    supabase.from('workspace_invites').select('id,email,role,accepted_at,created_at').eq('workspace_id', dashboardState.workspace.workspace_id).order('created_at'),
+  ]);
+  if (memberResult.error || inviteResult.error) throw memberResult.error || inviteResult.error;
+  dashboardState.teamMembers = memberResult.data || [];
+  dashboardState.teamInvites = inviteResult.data || [];
+  renderTeamMembers();
 }
 
 function loadVoiceOptions() {
@@ -279,8 +309,8 @@ function renderConversations() {
   }
 
   dashboardStatus.textContent = visible.length
-    ? `${visible.length} Conversation${visible.length === 1 ? '' : 's'}`
-    : 'No Conversations match this filter.';
+    ? `${visible.length} Drop${visible.length === 1 ? '' : 's'}`
+    : 'No Drops match this filter.';
   conversationList.innerHTML = visible.map((conversation) => `
     <article class="conversation-card">
       <div>
@@ -301,7 +331,7 @@ function renderConversations() {
 }
 
 async function loadConversations() {
-  dashboardStatus.textContent = 'Loading your Conversations…';
+  dashboardStatus.textContent = 'Loading your Drops…';
   const { data, error } = await supabase
     .from('conversations')
     .select('id,workspace_id,title,description,due_at,status,max_duration_seconds,created_at,updated_at,workspaces(name)')
@@ -323,6 +353,8 @@ async function loadDashboard(user) {
   renderAccountProfile();
   loadVoiceOptions();
 
+  const { error: workspaceInviteError } = await supabase.rpc('claim_workspace_invites');
+  if (workspaceInviteError) console.warn('Could not claim pending team invitation', workspaceInviteError);
   const { data, error } = await supabase.rpc('ensure_user_workspace');
   if (error) {
     dashboardStatus.textContent = `Dashboard setup is not complete: ${error.message}`;
@@ -333,8 +365,9 @@ async function loadDashboard(user) {
   dashboardState.workspace = data?.[0];
   if (!dashboardState.workspace) throw new Error('No workspace was returned for this account.');
   workspaceName.textContent = dashboardState.workspace.workspace_name;
+  await loadTeamMembers();
   const { error: claimInviteError } = await supabase.rpc('claim_conversation_invites');
-  if (claimInviteError) console.warn('Could not claim pending Conversation invites', claimInviteError);
+  if (claimInviteError) console.warn('Could not claim pending Drop invitations', claimInviteError);
   await loadConversations();
 }
 
@@ -647,7 +680,7 @@ async function playConversationEntries(entries) {
       if (!dashboardState.playbackCancelled) await markEntryComplete(entry);
     }
     if (!dashboardState.playbackCancelled) {
-      stopContinuousPlayback('Conversation complete. You are all caught up.');
+      stopContinuousPlayback('Drop complete. You are all caught up.');
       const participant = dashboardState.participants.find((item) => item.user_id === dashboardState.user.id);
       const responseRequested = entries.some((entry) => !entry.section_title || ['comment', 'respond'].includes(entry.section_requirement));
       if (participant?.role !== 'host' && responseRequested) responsePromptDialog.showModal();
@@ -707,7 +740,7 @@ async function showConversationDetail(conversationId) {
   try {
     await loadConversationWorkspace();
   } catch (error) {
-    workspaceMessage.textContent = `Could not load this Conversation: ${error.message}`;
+    workspaceMessage.textContent = `Could not load this Drop: ${error.message}`;
   }
 }
 
@@ -769,7 +802,7 @@ function assignmentLabel(mode) {
 function renderSectionReview() {
   const review = dashboardState.pendingSectionReview;
   if (!review) return;
-  const people = dashboardState.participants.filter((participant) => participant.user_id !== dashboardState.user.id);
+  const people = dashboardState.teamMembers.filter((participant) => participant.user_id !== dashboardState.user.id);
   sectionReviewList.innerHTML = review.sections.map((section, sectionIndex) => `
     <article class="section-review-card" data-review-section="${sectionIndex}">
       <div class="section-review-heading"><div><span>${formatElapsed(section.start_seconds)}–${formatElapsed(section.end_seconds)}</span><input data-section-title value="${escapeHTML(section.label)}" /></div><div><button class="ghost" data-assign-all type="button">Select all</button><button class="ghost" data-assign-none type="button">Clear all</button></div></div>
@@ -783,7 +816,7 @@ function renderSectionReview() {
 }
 
 function openSectionReview(entry, recordedSections) {
-  const people = dashboardState.participants.filter((participant) => participant.user_id !== dashboardState.user.id);
+  const people = dashboardState.teamMembers.filter((participant) => participant.user_id !== dashboardState.user.id);
   dashboardState.pendingSectionReview = {
     entry,
     sections: recordedSections.filter((section) => section.end_seconds - section.start_seconds >= .5).map((section) => ({
@@ -802,6 +835,15 @@ async function publishReviewedSections() {
   publishSectionsButton.disabled = true;
   sectionReviewMessage.textContent = 'Publishing sections and assignments…';
   try {
+    const assignedUserIds = [...new Set(review.sections.flatMap((section) => Object.entries(section.assignments).filter(([, mode]) => mode !== 'none').map(([userId]) => userId)))];
+    if (assignedUserIds.length) {
+      const participantRows = assignedUserIds.map((userId) => ({
+        conversation_id: dashboardState.currentConversation.id, user_id: userId, role: 'optional',
+        response_required: review.sections.some((section) => section.assignments[userId] === 'respond'), response_status: 'pending',
+      }));
+      const { error: participantError } = await supabase.from('conversation_participants').upsert(participantRows, { onConflict: 'conversation_id,user_id' });
+      if (participantError) throw participantError;
+    }
     for (let position = 0; position < review.sections.length; position += 1) {
       const section = review.sections[position];
       const card = sectionReviewList.querySelector(`[data-review-section="${position}"]`);
@@ -1022,6 +1064,7 @@ document.querySelector('#openProfileDialog').addEventListener('click', () => {
   profileMessage.textContent = '';
   renderAccountProfile();
   loadVoiceOptions();
+  loadTeamMembers().catch((error) => { teamMessage.textContent = `Could not load Team Members: ${error.message}`; });
   profileDialog.showModal();
 });
 document.querySelector('#closeProfileDialog').addEventListener('click', () => profileDialog.close());
@@ -1075,6 +1118,26 @@ profileForm.addEventListener('submit', async (event) => {
   } finally {
     saveProfileButton.disabled = false;
     saveProfileButton.textContent = 'Save profile';
+  }
+});
+teamInviteButton.addEventListener('click', async () => {
+  const email = teamInviteEmail.value.trim();
+  if (!email || !teamInviteEmail.checkValidity()) { teamInviteEmail.reportValidity(); return; }
+  teamInviteButton.disabled = true;
+  teamMessage.textContent = `Inviting ${email}…`;
+  try {
+    const { error: emailError } = await supabase.auth.signInWithOtp({
+      email, options: { shouldCreateUser: true, emailRedirectTo: `${window.location.origin}/` },
+    });
+    const { error } = await supabase.rpc('invite_team_member', { target_workspace_id: dashboardState.workspace.workspace_id, target_email: email });
+    if (error) throw error;
+    teamInviteEmail.value = '';
+    await loadTeamMembers();
+    teamMessage.textContent = emailError ? `Seat added, but the invitation email failed: ${emailError.message}` : `Team invitation sent to ${email}.`;
+  } catch (error) {
+    teamMessage.textContent = `Could not invite Team Member: ${error.message}`;
+  } finally {
+    teamInviteButton.disabled = false;
   }
 });
 signOutButton.addEventListener('click', async () => {
@@ -1310,7 +1373,7 @@ conversationForm.addEventListener('submit', async (event) => {
 
   createConversationButton.disabled = true;
   createConversationButton.textContent = 'Creating…';
-  conversationFormMessage.textContent = 'Creating your Conversation…';
+  conversationFormMessage.textContent = 'Creating your Drop…';
 
   const payload = {
     workspace_id: dashboardState.workspace.workspace_id,
@@ -1345,10 +1408,10 @@ conversationForm.addEventListener('submit', async (event) => {
     closeConversationDialog();
     dashboardStatus.textContent = `“${payload.title}” is ready.`;
   } catch (error) {
-    conversationFormMessage.textContent = `Could not create Conversation: ${error.message}`;
+    conversationFormMessage.textContent = `Could not create Drop: ${error.message}`;
   } finally {
     createConversationButton.disabled = false;
-    createConversationButton.textContent = 'Create Conversation';
+    createConversationButton.textContent = 'Create Drop';
   }
 });
 

@@ -160,6 +160,20 @@ button:disabled { cursor:wait; opacity:.58; }
 .profile-editor-avatar { width:104px; height:104px; margin:0 auto 20px; border-radius:50%; overflow:hidden; background:var(--red); color:white; display:grid; place-items:center; font-size:2.3rem; font-weight:900; }
 .profile-editor-avatar img { width:100%; height:100%; object-fit:cover; }
 .voice-help { margin:8px 0 0; opacity:.6; font-size:.82rem; line-height:1.45; }
+.team-settings { margin:24px 0 4px; padding:18px; border:1px solid rgba(127,127,127,.2); border-radius:18px; background:rgba(127,127,127,.07); }
+.team-settings > div:first-child { display:flex; align-items:end; gap:10px; }
+.team-settings h3 { margin:0; }
+.team-settings > div:first-child .eyebrow { width:100%; margin-bottom:4px; }
+.team-settings > div:first-child span { margin-left:auto; opacity:.55; font-size:.78rem; white-space:nowrap; }
+.team-settings > p { opacity:.65; line-height:1.45; }
+.team-invite-row { display:grid; grid-template-columns:1fr auto; gap:9px; }
+.team-invite-row input { min-width:0; }
+.team-member-list { display:grid; gap:7px; margin-top:12px; }
+.team-member-row { display:grid; grid-template-columns:auto 1fr auto; align-items:center; gap:10px; padding:10px; border-radius:13px; background:rgba(255,255,255,.05); }
+.team-member-row div { display:grid; gap:2px; }
+.team-member-row div span { opacity:.55; font-size:.78rem; }
+.team-member-row em { padding:4px 7px; border:1px solid rgba(127,127,127,.2); border-radius:999px; opacity:.58; font-size:.68rem; font-style:normal; text-transform:uppercase; }
+.team-member-row.pending { opacity:.62; }
 .recording-section-dock { position:fixed; z-index:20; right:24px; top:50%; width:min(260px,calc(100vw - 36px)); transform:translateY(-50%); padding:15px; border:1px solid rgba(255,255,255,.14); border-radius:18px; background:rgba(15,14,17,.9); box-shadow:0 18px 70px rgba(0,0,0,.55); backdrop-filter:blur(18px); }
 .recording-section-dock > div:first-child { display:grid; grid-template-columns:auto 1fr auto; align-items:center; gap:8px; }
 .recording-section-dock small { opacity:.55; }
