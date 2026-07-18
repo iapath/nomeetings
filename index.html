@@ -199,6 +199,20 @@
           </div>
         </section>
       </div>
+      <aside class="recording-section-dock" id="recordingSectionDock" hidden>
+        <div><span class="recording-dot"></span><strong id="recordingSectionLabel">Opening</strong><small id="recordingSectionTime">0:00</small></div>
+        <p>Start a new section</p>
+        <div id="recordingAgendaButtons"></div>
+        <button class="bookmark-section" id="recordingBookmarkButton" type="button">＋ Bookmark</button>
+      </aside>
+    </dialog>
+
+    <dialog class="conversation-dialog section-review-dialog" id="sectionReviewDialog">
+      <div class="dialog-heading"><div><p class="eyebrow">Review recording</p><h2>Assign each section</h2></div></div>
+      <p class="section-review-help">Everyone begins as Watch. Click a person to cycle through Can respond, Must respond, and Not assigned.</p>
+      <div class="section-review-list" id="sectionReviewList"></div>
+      <p class="form-message" id="sectionReviewMessage"></p>
+      <div class="dialog-actions"><button class="ghost" id="cancelSectionReview" type="button">Review later</button><button class="primary" id="publishSectionsButton" type="button">Publish sections</button></div>
     </dialog>
 
     <dialog class="focus-player" id="focusPlayerDialog">

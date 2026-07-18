@@ -93,6 +93,15 @@ const focusContent = document.querySelector('#focusContent');
 const focusPauseButton = document.querySelector('#focusPauseButton');
 const focusCloseButton = document.querySelector('#focusCloseButton');
 const focusProgress = document.querySelector('#focusProgress');
+const recordingSectionDock = document.querySelector('#recordingSectionDock');
+const recordingSectionLabel = document.querySelector('#recordingSectionLabel');
+const recordingSectionTime = document.querySelector('#recordingSectionTime');
+const recordingAgendaButtons = document.querySelector('#recordingAgendaButtons');
+const recordingBookmarkButton = document.querySelector('#recordingBookmarkButton');
+const sectionReviewDialog = document.querySelector('#sectionReviewDialog');
+const sectionReviewList = document.querySelector('#sectionReviewList');
+const sectionReviewMessage = document.querySelector('#sectionReviewMessage');
+const publishSectionsButton = document.querySelector('#publishSectionsButton');
 
 const dashboardState = {
   user: null,
@@ -104,6 +113,7 @@ const dashboardState = {
   participants: [],
   invites: [],
   entries: [],
+  sections: [],
   recorder: null,
   recordingStream: null,
   recordingChunks: [],
@@ -113,6 +123,10 @@ const dashboardState = {
   playbackCancelled: false,
   currentMedia: null,
   playbackResolve: null,
+  recordingStartedAt: 0,
+  recordingSections: [],
+  recordingSectionTimer: null,
+  pendingSectionReview: null,
 };
 
 function escapeHTML(value = '') {
@@ -369,7 +383,7 @@ function renderConversationWorkspace() {
   workspaceEntries.innerHTML = dashboardState.entries.length ? dashboardState.entries.map((entry, index) => `
     <article class="workspace-row ${dashboardState.watchProgress.get(entry.id)?.completed ? 'watched' : ''}" data-entry-row="${entry.id}" style="--person-hue:${personHue(entry)}">
       <span class="entry-kind">${escapeHTML(entry.kind)}</span>
-      <div><div class="identity-line">${avatarMarkup(entry.profiles)}<h4>${escapeHTML(entry.profiles?.display_name || entry.profiles?.email || 'Participant')}</h4></div>${entry.kind === 'text' && entry.text_body ? renderTimedText(entry) : `<p>${entry.status === 'ready' ? 'Clip uploaded and ready.' : escapeHTML(entry.status)}</p>`}${entry.media_url ? `<${entry.kind === 'video' ? 'video' : 'audio'} class="entry-media" controls preload="auto" data-entry-media="${entry.id}" src="${escapeHTML(entry.media_url)}"></${entry.kind === 'video' ? 'video' : 'audio'}>` : entry.kind === 'text' ? `<div class="voice-missing"><button class="ghost" type="button" data-generate-voice="${entry.id}">Generate voice</button><span data-voice-error="${entry.id}">No saved audio yet.</span></div>` : ''}${entry.kind !== 'text' ? (entry.text_body ? renderTimedText(entry, true) : `<div class="voice-missing"><button class="ghost" type="button" data-transcribe-media="${entry.id}">Generate transcript</button><span data-transcript-error="${entry.id}">No transcript yet.</span></div>`) : ''}</div>
+      <div><div class="identity-line">${avatarMarkup(entry.profiles)}<h4>${escapeHTML(entry.profiles?.display_name || entry.profiles?.email || 'Participant')}</h4></div>${entry.kind === 'text' && entry.text_body ? renderTimedText(entry) : `<p>${entry.status === 'ready' ? 'Clip uploaded and ready.' : escapeHTML(entry.status)}</p>`}${entry.media_url ? `<${entry.kind === 'video' ? 'video' : 'audio'} class="entry-media" controls preload="auto" data-entry-media="${entry.id}" src="${escapeHTML(entry.media_url)}"></${entry.kind === 'video' ? 'video' : 'audio'}>` : entry.kind === 'text' ? `<div class="voice-missing"><button class="ghost" type="button" data-generate-voice="${entry.id}">Generate voice</button><span data-voice-error="${entry.id}">No saved audio yet.</span></div>` : ''}${entry.kind !== 'text' ? (entry.text_body ? renderTimedText(entry, true) : `<div class="voice-missing"><button class="ghost" type="button" data-transcribe-media="${entry.id}">Generate transcript</button><span data-transcript-error="${entry.id}">No transcript yet.</span></div>`) : ''}${renderSectionBadges(entry)}</div>
       <div class="workspace-row-meta"><span class="watch-state">${dashboardState.watchProgress.get(entry.id)?.completed ? '✓ Played' : 'New'}</span><span>${escapeHTML(formatDate(entry.created_at))}</span><button class="ghost play-from-entry" type="button" data-play-index="${index}">Play from here</button></div>
     </article>`).join('') : '<div class="empty-inline">No responses yet. Upload a clip, record one, or write an update.</div>';
 
@@ -385,6 +399,28 @@ function renderConversationWorkspace() {
       if (entry && !dashboardState.autoplayActive) await markEntryComplete(entry);
       if (!dashboardState.autoplayActive && participant?.role !== 'host' && entry?.author_id !== dashboardState.user.id) responsePromptDialog.showModal();
     });
+  });
+}
+
+function renderSectionBadges(entry) {
+  const sections = dashboardState.sections.filter((section) => section.entry_id === entry.id);
+  if (!sections.length) return '';
+  return `<div class="entry-sections"><span>Sections</span>${sections.map((section) => `<button type="button" data-section-start="${section.timestamp_seconds}" data-entry-id="${entry.id}">${escapeHTML(section.label)} · ${formatElapsed(section.timestamp_seconds)}</button>`).join('')}</div>`;
+}
+
+function expandPlaybackEntries(entries) {
+  const currentParticipant = dashboardState.participants.find((participant) => participant.user_id === dashboardState.user.id);
+  return entries.flatMap((entry) => {
+    const sections = dashboardState.sections.filter((section) => section.entry_id === entry.id);
+    if (!sections.length) return [entry];
+    return sections.filter((section) => currentParticipant?.role === 'host' || section.marker_assignments?.some((assignment) => assignment.user_id === dashboardState.user.id)).map((section) => ({
+      ...entry,
+      playback_start: section.timestamp_seconds,
+      playback_end: section.end_seconds,
+      section_title: section.label,
+      section_summary: section.summary,
+      section_requirement: section.marker_assignments?.find((assignment) => assignment.user_id === dashboardState.user.id)?.requirement || 'watch',
+    }));
   });
 }
 
@@ -447,7 +483,7 @@ async function transitionFocusEntry(entry, index, total) {
   }
   const profile = entry.profiles || {};
   focusStage.style.setProperty('--person-hue', personHue(entry));
-  focusSpeaker.innerHTML = `${avatarMarkup(profile)}<strong>${escapeHTML(profile.display_name || profile.email || 'Participant')}</strong>`;
+  focusSpeaker.innerHTML = `${avatarMarkup(profile)}<div><strong>${escapeHTML(profile.display_name || profile.email || 'Participant')}</strong>${entry.section_title ? `<small>${escapeHTML(entry.section_title)}</small>` : ''}</div>`;
   focusProgress.textContent = `${index + 1} of ${total}`;
   const transcript = entry.text_body
     ? renderTimedText(entry, true).replace('media-transcript', 'media-transcript focus-transcript')
@@ -559,12 +595,22 @@ function playMediaEntry(entry) {
     const fail = () => { media.removeEventListener('ended', finish); media.removeEventListener('error', fail); reject(new Error('This recording could not be played.')); };
     media.addEventListener('ended', finish);
     media.addEventListener('error', fail);
-    media.currentTime = 0;
+    media.currentTime = Number(entry.playback_start) || 0;
     try {
       if (media.readyState < HTMLMediaElement.HAVE_FUTURE_DATA) {
         await new Promise((readyResolve) => media.addEventListener('canplay', readyResolve, { once: true }));
       }
       await media.play();
+      if (Number.isFinite(entry.playback_end)) {
+        const stopAtSectionEnd = () => {
+          if (media.currentTime >= entry.playback_end) {
+            media.removeEventListener('timeupdate', stopAtSectionEnd);
+            media.pause();
+            finish();
+          }
+        };
+        media.addEventListener('timeupdate', stopAtSectionEnd);
+      }
       followWords();
     } catch (error) { fail(); }
   });
@@ -603,7 +649,8 @@ async function playConversationEntries(entries) {
     if (!dashboardState.playbackCancelled) {
       stopContinuousPlayback('Conversation complete. You are all caught up.');
       const participant = dashboardState.participants.find((item) => item.user_id === dashboardState.user.id);
-      if (participant?.role !== 'host') responsePromptDialog.showModal();
+      const responseRequested = entries.some((entry) => !entry.section_title || ['comment', 'respond'].includes(entry.section_requirement));
+      if (participant?.role !== 'host' && responseRequested) responsePromptDialog.showModal();
     }
   } catch (error) {
     stopContinuousPlayback(`Playback stopped: ${error.message}`);
@@ -633,6 +680,13 @@ async function loadConversationWorkspace() {
     const { data } = await supabase.storage.from(entry.storage_bucket).createSignedUrl(entry.storage_path, 3600);
     entry.media_url = data?.signedUrl || null;
   }));
+  if (dashboardState.entries.length) {
+    const { data: sections, error: sectionError } = await supabase.from('conversation_markers')
+      .select('id,entry_id,agenda_item_id,marker_kind,label,timestamp_seconds,end_seconds,summary,position,marker_assignments(user_id,requirement)')
+      .in('entry_id', dashboardState.entries.map((entry) => entry.id)).not('end_seconds', 'is', null).order('position');
+    if (sectionError) console.warn('Could not load recording sections', sectionError);
+    dashboardState.sections = sections || [];
+  } else dashboardState.sections = [];
   workspaceMessage.textContent = '';
   renderConversationWorkspace();
 }
@@ -654,6 +708,125 @@ async function showConversationDetail(conversationId) {
     await loadConversationWorkspace();
   } catch (error) {
     workspaceMessage.textContent = `Could not load this Conversation: ${error.message}`;
+  }
+}
+
+function recordingElapsedSeconds() {
+  return Math.max(0, (performance.now() - dashboardState.recordingStartedAt) / 1000);
+}
+
+function formatElapsed(seconds) {
+  const total = Math.max(0, Math.floor(seconds));
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
+}
+
+function beginRecordingSection({ agendaItemId = null, label = 'Bookmark', markerKind = 'manual' }) {
+  const now = recordingElapsedSeconds();
+  const previous = dashboardState.recordingSections.at(-1);
+  if (previous) previous.end_seconds = now;
+  dashboardState.recordingSections.push({ agenda_item_id: agendaItemId, marker_kind: markerKind, label, start_seconds: now, end_seconds: null });
+  recordingSectionLabel.textContent = label;
+  recordingAgendaButtons.querySelectorAll('button').forEach((button) => button.classList.toggle('active', button.dataset.agendaId === agendaItemId));
+}
+
+function openRecordingSectionDock() {
+  dashboardState.recordingStartedAt = performance.now();
+  dashboardState.recordingSections = [{ agenda_item_id: null, marker_kind: 'manual', label: 'Opening', start_seconds: 0, end_seconds: null }];
+  recordingSectionLabel.textContent = 'Opening';
+  recordingAgendaButtons.innerHTML = dashboardState.agenda.map((item) => `<button type="button" data-agenda-id="${item.id}">${escapeHTML(item.title)}</button>`).join('');
+  recordingSectionDock.hidden = false;
+  dashboardState.recordingSectionTimer = window.setInterval(() => { recordingSectionTime.textContent = formatElapsed(recordingElapsedSeconds()); }, 500);
+}
+
+function closeRecordingSectionDock() {
+  const final = dashboardState.recordingSections.at(-1);
+  if (final && final.end_seconds === null) final.end_seconds = recordingElapsedSeconds();
+  window.clearInterval(dashboardState.recordingSectionTimer);
+  dashboardState.recordingSectionTimer = null;
+  recordingSectionDock.hidden = true;
+}
+
+function sectionTranscript(entry, section) {
+  const words = (entry.tts_alignment || []).filter((word) => word.start >= section.start_seconds && word.start < section.end_seconds);
+  return words.map((word) => word.text).join(' ').trim();
+}
+
+function suggestedSectionDetails(entry, section) {
+  const transcript = sectionTranscript(entry, section);
+  const cleanWords = transcript.split(/\s+/).filter(Boolean);
+  const suggestedTitle = cleanWords.slice(0, 7).join(' ').replace(/[.,!?;:]$/, '');
+  return {
+    ...section,
+    label: section.agenda_item_id ? section.label : (suggestedTitle || section.label),
+    summary: cleanWords.slice(0, 30).join(' ') + (cleanWords.length > 30 ? '…' : ''),
+  };
+}
+
+function assignmentLabel(mode) {
+  return ({ watch: 'Watch', comment: 'Can respond', respond: 'Must respond', none: 'Not assigned' })[mode];
+}
+
+function renderSectionReview() {
+  const review = dashboardState.pendingSectionReview;
+  if (!review) return;
+  const people = dashboardState.participants.filter((participant) => participant.user_id !== dashboardState.user.id);
+  sectionReviewList.innerHTML = review.sections.map((section, sectionIndex) => `
+    <article class="section-review-card" data-review-section="${sectionIndex}">
+      <div class="section-review-heading"><div><span>${formatElapsed(section.start_seconds)}–${formatElapsed(section.end_seconds)}</span><input data-section-title value="${escapeHTML(section.label)}" /></div><div><button class="ghost" data-assign-all type="button">Select all</button><button class="ghost" data-assign-none type="button">Clear all</button></div></div>
+      <textarea data-section-summary rows="2">${escapeHTML(section.summary || '')}</textarea>
+      <h4>Who needs this section?</h4>
+      <div class="section-people">${people.map((participant) => {
+        const mode = section.assignments[participant.user_id] || 'watch';
+        return `<button class="section-person mode-${mode}" type="button" data-section-person="${participant.user_id}" data-mode="${mode}">${avatarMarkup(participant.profiles)}<strong>${escapeHTML(participant.profiles?.display_name || participant.profiles?.email || 'Participant')}</strong><span>${assignmentLabel(mode)}</span></button>`;
+      }).join('')}</div>
+    </article>`).join('');
+}
+
+function openSectionReview(entry, recordedSections) {
+  const people = dashboardState.participants.filter((participant) => participant.user_id !== dashboardState.user.id);
+  dashboardState.pendingSectionReview = {
+    entry,
+    sections: recordedSections.filter((section) => section.end_seconds - section.start_seconds >= .5).map((section) => ({
+      ...suggestedSectionDetails(entry, section),
+      assignments: Object.fromEntries(people.map((person) => [person.user_id, 'watch'])),
+    })),
+  };
+  sectionReviewMessage.textContent = '';
+  renderSectionReview();
+  sectionReviewDialog.showModal();
+}
+
+async function publishReviewedSections() {
+  const review = dashboardState.pendingSectionReview;
+  if (!review) return;
+  publishSectionsButton.disabled = true;
+  sectionReviewMessage.textContent = 'Publishing sections and assignments…';
+  try {
+    for (let position = 0; position < review.sections.length; position += 1) {
+      const section = review.sections[position];
+      const card = sectionReviewList.querySelector(`[data-review-section="${position}"]`);
+      section.label = card.querySelector('[data-section-title]').value.trim() || section.label;
+      section.summary = card.querySelector('[data-section-summary]').value.trim();
+      const { data: marker, error } = await supabase.from('conversation_markers').insert({
+        entry_id: review.entry.id, agenda_item_id: section.agenda_item_id, marker_kind: section.marker_kind,
+        label: section.label, timestamp_seconds: Math.floor(section.start_seconds), end_seconds: Math.ceil(section.end_seconds),
+        summary: section.summary || null, position, created_by: dashboardState.user.id,
+      }).select('id').single();
+      if (error) throw error;
+      const assignments = Object.entries(section.assignments).filter(([, mode]) => mode !== 'none').map(([userId, requirement]) => ({ marker_id: marker.id, user_id: userId, requirement }));
+      if (assignments.length) {
+        const { error: assignmentError } = await supabase.from('marker_assignments').insert(assignments);
+        if (assignmentError) throw assignmentError;
+      }
+    }
+    sectionReviewDialog.close();
+    dashboardState.pendingSectionReview = null;
+    await loadConversationWorkspace();
+    workspaceMessage.textContent = 'Recording sections published and assigned.';
+  } catch (error) {
+    sectionReviewMessage.textContent = `Could not publish sections: ${error.message}`;
+  } finally {
+    publishSectionsButton.disabled = false;
   }
 }
 
@@ -721,6 +894,7 @@ async function uploadConversationClip(file, forcedKind) {
   } catch (error) {
     setUploadProgress(`Clip is ready. Transcript failed: ${error.message}`, 100);
   }
+  return entry;
 }
 
 async function startRecording(kind) {
@@ -732,15 +906,23 @@ async function startRecording(kind) {
     dashboardState.recorder = recorder;
     recorder.addEventListener('dataavailable', (event) => { if (event.data.size) dashboardState.recordingChunks.push(event.data); });
     recorder.addEventListener('stop', async () => {
+      closeRecordingSectionDock();
+      const recordedSections = dashboardState.recordingSections.map((section) => ({ ...section }));
       const blob = new Blob(dashboardState.recordingChunks, { type: recorder.mimeType || `${kind}/webm` });
       dashboardState.recordingStream?.getTracks().forEach((track) => track.stop());
       recordAudioButton.disabled = false;
       recordVideoButton.disabled = false;
       stopRecordingButton.disabled = true;
-      try { await uploadConversationClip(new File([blob], `${kind}-${Date.now()}.webm`, { type: blob.type }), kind); }
+      try {
+        const entry = await uploadConversationClip(new File([blob], `${kind}-${Date.now()}.webm`, { type: blob.type }), kind);
+        const currentParticipant = dashboardState.participants.find((participant) => participant.user_id === dashboardState.user.id);
+        if (currentParticipant?.role === 'host' && entry) openSectionReview(entry, recordedSections);
+      }
       catch (error) { workspaceMessage.textContent = `Could not save recording: ${error.message}`; }
     });
     recorder.start();
+    const currentParticipant = dashboardState.participants.find((participant) => participant.user_id === dashboardState.user.id);
+    if (currentParticipant?.role === 'host') openRecordingSectionDock();
     recordAudioButton.disabled = true;
     recordVideoButton.disabled = true;
     stopRecordingButton.disabled = false;
@@ -996,11 +1178,40 @@ workspaceUpload.addEventListener('change', async () => {
 recordAudioButton.addEventListener('click', () => startRecording('audio'));
 recordVideoButton.addEventListener('click', () => startRecording('video'));
 stopRecordingButton.addEventListener('click', () => dashboardState.recorder?.stop());
+recordingAgendaButtons.addEventListener('click', (event) => {
+  const button = event.target.closest('[data-agenda-id]');
+  if (!button) return;
+  const item = dashboardState.agenda.find((agendaItem) => agendaItem.id === button.dataset.agendaId);
+  if (item) beginRecordingSection({ agendaItemId: item.id, label: item.title, markerKind: 'agenda' });
+});
+recordingBookmarkButton.addEventListener('click', () => beginRecordingSection({ label: `Bookmark ${dashboardState.recordingSections.length}`, markerKind: 'manual' }));
+sectionReviewList.addEventListener('click', (event) => {
+  const card = event.target.closest('[data-review-section]');
+  if (!card || !dashboardState.pendingSectionReview) return;
+  const section = dashboardState.pendingSectionReview.sections[Number(card.dataset.reviewSection)];
+  const person = event.target.closest('[data-section-person]');
+  if (person) {
+    const modes = ['watch', 'comment', 'respond', 'none'];
+    const next = modes[(modes.indexOf(person.dataset.mode) + 1) % modes.length];
+    section.assignments[person.dataset.sectionPerson] = next;
+    person.className = `section-person mode-${next}`;
+    person.dataset.mode = next;
+    person.querySelector('span').textContent = assignmentLabel(next);
+    return;
+  }
+  const mode = event.target.closest('[data-assign-all]') ? 'watch' : event.target.closest('[data-assign-none]') ? 'none' : null;
+  if (mode) {
+    Object.keys(section.assignments).forEach((userId) => { section.assignments[userId] = mode; });
+    renderSectionReview();
+  }
+});
+publishSectionsButton.addEventListener('click', publishReviewedSections);
+document.querySelector('#cancelSectionReview').addEventListener('click', () => sectionReviewDialog.close());
 playNewButton.addEventListener('click', () => {
   const newEntries = dashboardState.entries.filter((entry) => !dashboardState.watchProgress.get(entry.id)?.completed);
-  playConversationEntries(newEntries);
+  playConversationEntries(expandPlaybackEntries(newEntries));
 });
-playAllButton.addEventListener('click', () => playConversationEntries(dashboardState.entries));
+playAllButton.addEventListener('click', () => playConversationEntries(expandPlaybackEntries(dashboardState.entries)));
 stopPlaybackButton.addEventListener('click', () => stopContinuousPlayback());
 focusPauseButton.addEventListener('click', async () => {
   const media = dashboardState.currentMedia;
@@ -1019,6 +1230,13 @@ focusPlayerDialog.addEventListener('cancel', (event) => {
   stopContinuousPlayback('Focus playback closed.');
 });
 workspaceEntries.addEventListener('click', (event) => {
+  const sectionButton = event.target.closest('[data-section-start]');
+  if (sectionButton) {
+    const entry = dashboardState.entries.find((item) => item.id === sectionButton.dataset.entryId);
+    const section = dashboardState.sections.find((item) => item.entry_id === entry?.id && item.timestamp_seconds === Number(sectionButton.dataset.sectionStart));
+    if (entry && section) playConversationEntries([{ ...entry, playback_start: section.timestamp_seconds, playback_end: section.end_seconds, section_title: section.label, section_summary: section.summary }]);
+    return;
+  }
   const voiceButton = event.target.closest('[data-generate-voice]');
   if (voiceButton) {
     const entry = dashboardState.entries.find((item) => item.id === voiceButton.dataset.generateVoice);
@@ -1051,7 +1269,7 @@ workspaceEntries.addEventListener('click', (event) => {
   }
   const button = event.target.closest('[data-play-index]');
   if (!button) return;
-  playConversationEntries(dashboardState.entries.slice(Number(button.dataset.playIndex)));
+  playConversationEntries(expandPlaybackEntries(dashboardState.entries.slice(Number(button.dataset.playIndex))));
 });
 document.querySelector('#closeResponsePrompt').addEventListener('click', () => responsePromptDialog.close());
 document.querySelector('#promptRecordAudio').addEventListener('click', () => {
