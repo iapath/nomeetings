@@ -85,6 +85,14 @@ const playNewButton = document.querySelector('#playNewButton');
 const playAllButton = document.querySelector('#playAllButton');
 const stopPlaybackButton = document.querySelector('#stopPlaybackButton');
 const playbackStatus = document.querySelector('#playbackStatus');
+const focusPlayerDialog = document.querySelector('#focusPlayerDialog');
+const focusStage = document.querySelector('#focusStage');
+const focusCard = document.querySelector('#focusCard');
+const focusSpeaker = document.querySelector('#focusSpeaker');
+const focusContent = document.querySelector('#focusContent');
+const focusPauseButton = document.querySelector('#focusPauseButton');
+const focusCloseButton = document.querySelector('#focusCloseButton');
+const focusProgress = document.querySelector('#focusProgress');
 
 const dashboardState = {
   user: null,
@@ -126,6 +134,13 @@ function avatarMarkup(profile) {
   return profile?.avatar_url
     ? `<img class="row-avatar" src="${escapeHTML(profile.avatar_url)}" alt="" />`
     : `<span class="row-avatar-fallback">${escapeHTML(profileInitial(profile))}</span>`;
+}
+
+function personHue(entry) {
+  const value = entry.author_id || entry.profiles?.email || 'participant';
+  let hash = 0;
+  for (let index = 0; index < value.length; index += 1) hash = ((hash << 5) - hash + value.charCodeAt(index)) | 0;
+  return Math.abs(hash) % 360;
 }
 
 function renderAccountProfile() {
@@ -352,7 +367,7 @@ function renderConversationWorkspace() {
   workspaceParticipants.innerHTML = [...participantRows, ...inviteRows].join('') || '<div class="empty-inline">Invite the people who need this update.</div>';
 
   workspaceEntries.innerHTML = dashboardState.entries.length ? dashboardState.entries.map((entry, index) => `
-    <article class="workspace-row ${dashboardState.watchProgress.get(entry.id)?.completed ? 'watched' : ''}" data-entry-row="${entry.id}">
+    <article class="workspace-row ${dashboardState.watchProgress.get(entry.id)?.completed ? 'watched' : ''}" data-entry-row="${entry.id}" style="--person-hue:${personHue(entry)}">
       <span class="entry-kind">${escapeHTML(entry.kind)}</span>
       <div><div class="identity-line">${avatarMarkup(entry.profiles)}<h4>${escapeHTML(entry.profiles?.display_name || entry.profiles?.email || 'Participant')}</h4></div>${entry.kind === 'text' && entry.text_body ? renderTimedText(entry) : `<p>${entry.status === 'ready' ? 'Clip uploaded and ready.' : escapeHTML(entry.status)}</p>`}${entry.media_url ? `<${entry.kind === 'video' ? 'video' : 'audio'} class="entry-media" controls preload="auto" data-entry-media="${entry.id}" src="${escapeHTML(entry.media_url)}"></${entry.kind === 'video' ? 'video' : 'audio'}>` : entry.kind === 'text' ? `<div class="voice-missing"><button class="ghost" type="button" data-generate-voice="${entry.id}">Generate voice</button><span data-voice-error="${entry.id}">No saved audio yet.</span></div>` : ''}${entry.kind !== 'text' ? (entry.text_body ? renderTimedText(entry, true) : `<div class="voice-missing"><button class="ghost" type="button" data-transcribe-media="${entry.id}">Generate transcript</button><span data-transcript-error="${entry.id}">No transcript yet.</span></div>`) : ''}</div>
       <div class="workspace-row-meta"><span class="watch-state">${dashboardState.watchProgress.get(entry.id)?.completed ? '✓ Played' : 'New'}</span><span>${escapeHTML(formatDate(entry.created_at))}</span><button class="ghost play-from-entry" type="button" data-play-index="${index}">Play from here</button></div>
@@ -411,18 +426,41 @@ function estimateWordTiming(text, durationSeconds) {
 }
 
 function updateSpokenWord(entry, currentTime) {
-  const text = workspaceEntries.querySelector(`[data-spoken-text="${entry.id}"]`);
-  if (!text) return;
   const activeIndex = currentTime < 0 ? -1 : entry.tts_alignment.findIndex((word, index) => {
     const nextStart = entry.tts_alignment[index + 1]?.start ?? word.end + .2;
     return currentTime >= word.start && currentTime < nextStart;
   });
-  text.querySelectorAll('[data-spoken-word]').forEach((word, index) => word.classList.toggle('speaking', index === activeIndex));
-  if (entry.kind === 'video') {
-    const activeLine = activeIndex < 0 ? null : captionLineIndexes(entry.tts_alignment)[activeIndex];
-    text.classList.toggle('caption-active', activeLine !== null);
-    text.querySelectorAll('[data-caption-line]').forEach((line) => line.classList.toggle('active', Number(line.dataset.captionLine) === activeLine));
+  document.querySelectorAll(`[data-spoken-text="${entry.id}"]`).forEach((text) => {
+    text.querySelectorAll('[data-spoken-word]').forEach((word, index) => word.classList.toggle('speaking', index === activeIndex));
+    if (entry.kind === 'video' || text.classList.contains('focus-transcript')) {
+      const activeLine = activeIndex < 0 ? null : captionLineIndexes(entry.tts_alignment)[activeIndex];
+      text.classList.toggle('caption-active', activeLine !== null);
+      text.querySelectorAll('[data-caption-line]').forEach((line) => line.classList.toggle('active', Number(line.dataset.captionLine) === activeLine));
+    }
+  });
+}
+
+async function transitionFocusEntry(entry, index, total) {
+  if (focusContent.childElementCount) {
+    focusCard.classList.add('leaving');
+    await new Promise((resolve) => setTimeout(resolve, 230));
   }
+  const profile = entry.profiles || {};
+  focusStage.style.setProperty('--person-hue', personHue(entry));
+  focusSpeaker.innerHTML = `${avatarMarkup(profile)}<strong>${escapeHTML(profile.display_name || profile.email || 'Participant')}</strong>`;
+  focusProgress.textContent = `${index + 1} of ${total}`;
+  const transcript = entry.text_body
+    ? renderTimedText(entry, true).replace('media-transcript', 'media-transcript focus-transcript')
+    : '<p class="focus-waiting">Transcript unavailable</p>';
+  if (entry.kind === 'video') {
+    focusContent.innerHTML = `<video class="focus-media" data-focus-media="${entry.id}" preload="auto" src="${escapeHTML(entry.media_url || '')}"></video>${transcript}`;
+  } else {
+    focusContent.innerHTML = `<div class="focus-audio-visual">${avatarMarkup(profile)}<span>${entry.kind === 'text' ? 'Written response' : 'Audio response'}</span></div>${transcript}<audio data-focus-media="${entry.id}" preload="auto" src="${escapeHTML(entry.media_url || '')}"></audio>`;
+  }
+  focusPauseButton.textContent = 'Pause';
+  focusCard.classList.remove('leaving');
+  focusCard.classList.add('entering');
+  requestAnimationFrame(() => requestAnimationFrame(() => focusCard.classList.remove('entering')));
 }
 
 async function transcribeMediaEntry(entry, shouldRender = true) {
@@ -464,6 +502,7 @@ function stopContinuousPlayback(message = 'Playback stopped.') {
   playAllButton.disabled = false;
   stopPlaybackButton.disabled = true;
   playbackStatus.textContent = message;
+  if (focusPlayerDialog.open) focusPlayerDialog.close();
 }
 
 async function generateTextAudio(entry, shouldRender = true) {
@@ -496,7 +535,9 @@ async function playTextEntry(entry) {
 
 function playMediaEntry(entry) {
   return new Promise(async (resolve, reject) => {
-    const media = workspaceEntries.querySelector(`[data-entry-media="${entry.id}"]`);
+    const media = dashboardState.autoplayActive
+      ? focusContent.querySelector(`[data-focus-media="${entry.id}"]`)
+      : workspaceEntries.querySelector(`[data-entry-media="${entry.id}"]`);
     if (!media) {
       reject(new Error('This recording is not available for playback.'));
       return;
@@ -544,15 +585,17 @@ async function playConversationEntries(entries) {
   playNewButton.disabled = true;
   playAllButton.disabled = true;
   stopPlaybackButton.disabled = false;
+  if (!focusPlayerDialog.open) focusPlayerDialog.showModal();
 
   try {
-    for (const entry of entries) {
+    for (let entryIndex = 0; entryIndex < entries.length; entryIndex += 1) {
+      const entry = entries[entryIndex];
       if (dashboardState.playbackCancelled) break;
       const author = entry.profiles?.display_name || entry.profiles?.email || 'Participant';
       playbackStatus.textContent = entry.kind === 'text' ? `Reading ${author}'s response…` : `Playing ${author}'s ${entry.kind}…`;
-      workspaceEntries.querySelector(`[data-entry-row="${entry.id}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      if (entry.kind === 'text') await playTextEntry(entry);
-      else await playMediaEntry(entry);
+      if (entry.kind === 'text' && !entry.media_url) await generateTextAudio(entry);
+      await transitionFocusEntry(entry, entryIndex, entries.length);
+      await playMediaEntry(entry);
       dashboardState.playbackResolve = null;
       dashboardState.currentMedia = null;
       if (!dashboardState.playbackCancelled) await markEntryComplete(entry);
@@ -959,6 +1002,22 @@ playNewButton.addEventListener('click', () => {
 });
 playAllButton.addEventListener('click', () => playConversationEntries(dashboardState.entries));
 stopPlaybackButton.addEventListener('click', () => stopContinuousPlayback());
+focusPauseButton.addEventListener('click', async () => {
+  const media = dashboardState.currentMedia;
+  if (!media) return;
+  if (media.paused) {
+    await media.play();
+    focusPauseButton.textContent = 'Pause';
+  } else {
+    media.pause();
+    focusPauseButton.textContent = 'Play';
+  }
+});
+focusCloseButton.addEventListener('click', () => stopContinuousPlayback('Focus playback closed.'));
+focusPlayerDialog.addEventListener('cancel', (event) => {
+  event.preventDefault();
+  stopContinuousPlayback('Focus playback closed.');
+});
 workspaceEntries.addEventListener('click', (event) => {
   const voiceButton = event.target.closest('[data-generate-voice]');
   if (voiceButton) {
