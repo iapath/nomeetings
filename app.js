@@ -67,6 +67,7 @@ const textResponseForm = document.querySelector('#textResponseForm');
 const workspaceUpload = document.querySelector('#workspaceUpload');
 const recordAudioButton = document.querySelector('#recordAudioButton');
 const recordVideoButton = document.querySelector('#recordVideoButton');
+const recordScreenButton = document.querySelector('#recordScreenButton');
 const stopRecordingButton = document.querySelector('#stopRecordingButton');
 const uploadProgress = document.querySelector('#uploadProgress');
 const uploadProgressBar = document.querySelector('#uploadProgressBar');
@@ -108,6 +109,10 @@ const teamInviteEmail = document.querySelector('#teamInviteEmail');
 const teamInviteButton = document.querySelector('#teamInviteButton');
 const teamMessage = document.querySelector('#teamMessage');
 const teamSeatCount = document.querySelector('#teamSeatCount');
+if (!navigator.mediaDevices?.getDisplayMedia) {
+  recordScreenButton.hidden = true;
+  document.querySelector('#promptRecordScreen').hidden = true;
+}
 
 const dashboardState = {
   user: null,
@@ -122,6 +127,8 @@ const dashboardState = {
   sections: [],
   recorder: null,
   recordingStream: null,
+  recordingSourceStreams: [],
+  recordingAudioContext: null,
   recordingChunks: [],
   profile: null,
   watchProgress: new Map(),
@@ -416,7 +423,7 @@ function renderConversationWorkspace() {
   workspaceEntries.innerHTML = dashboardState.entries.length ? dashboardState.entries.map((entry, index) => `
     <article class="workspace-row ${dashboardState.watchProgress.get(entry.id)?.completed ? 'watched' : ''}" data-entry-row="${entry.id}" style="--person-hue:${personHue(entry)}">
       <span class="entry-kind">${escapeHTML(entry.kind)}</span>
-      <div><div class="identity-line">${avatarMarkup(entry.profiles)}<h4>${escapeHTML(entry.profiles?.display_name || entry.profiles?.email || 'Participant')}</h4></div>${entry.kind === 'text' && entry.text_body ? renderTimedText(entry) : `<p>${entry.status === 'ready' ? 'Clip uploaded and ready.' : escapeHTML(entry.status)}</p>`}${entry.media_url ? `<${entry.kind === 'video' ? 'video' : 'audio'} class="entry-media" controls preload="auto" data-entry-media="${entry.id}" src="${escapeHTML(entry.media_url)}"></${entry.kind === 'video' ? 'video' : 'audio'}>` : entry.kind === 'text' ? `<div class="voice-missing"><button class="ghost" type="button" data-generate-voice="${entry.id}">Generate voice</button><span data-voice-error="${entry.id}">No saved audio yet.</span></div>` : ''}${entry.kind !== 'text' ? (entry.text_body ? renderTimedText(entry, true) : `<div class="voice-missing"><button class="ghost" type="button" data-transcribe-media="${entry.id}">Generate transcript</button><span data-transcript-error="${entry.id}">No transcript yet.</span></div>`) : ''}${renderSectionBadges(entry)}</div>
+      <div><div class="identity-line">${avatarMarkup(entry.profiles)}<h4>${escapeHTML(entry.profiles?.display_name || entry.profiles?.email || 'Participant')}</h4></div>${entry.kind === 'text' && entry.text_body ? renderTimedText(entry) : `<p>${entry.status === 'ready' ? 'Clip uploaded and ready.' : escapeHTML(entry.status)}</p>`}${entry.media_url ? `<${['video', 'screen'].includes(entry.kind) ? 'video' : 'audio'} class="entry-media" controls preload="auto" data-entry-media="${entry.id}" src="${escapeHTML(entry.media_url)}"></${['video', 'screen'].includes(entry.kind) ? 'video' : 'audio'}>` : entry.kind === 'text' ? `<div class="voice-missing"><button class="ghost" type="button" data-generate-voice="${entry.id}">Generate voice</button><span data-voice-error="${entry.id}">No saved audio yet.</span></div>` : ''}${entry.kind !== 'text' ? (entry.text_body ? renderTimedText(entry, true) : `<div class="voice-missing"><button class="ghost" type="button" data-transcribe-media="${entry.id}">Generate transcript</button><span data-transcript-error="${entry.id}">No transcript yet.</span></div>`) : ''}${renderSectionBadges(entry)}</div>
       <div class="workspace-row-meta"><span class="watch-state">${dashboardState.watchProgress.get(entry.id)?.completed ? '✓ Played' : 'New'}</span><span>${escapeHTML(formatDate(entry.created_at))}</span><button class="ghost play-from-entry" type="button" data-play-index="${index}">Play from here</button></div>
     </article>`).join('') : '<div class="empty-inline">No responses yet. Upload a clip, record one, or write an update.</div>';
 
@@ -501,7 +508,7 @@ function updateSpokenWord(entry, currentTime) {
   });
   document.querySelectorAll(`[data-spoken-text="${entry.id}"]`).forEach((text) => {
     text.querySelectorAll('[data-spoken-word]').forEach((word, index) => word.classList.toggle('speaking', index === activeIndex));
-    if (entry.kind === 'video' || text.classList.contains('focus-transcript')) {
+    if (['video', 'screen'].includes(entry.kind) || text.classList.contains('focus-transcript')) {
       const activeLine = activeIndex < 0 ? null : captionLineIndexes(entry.tts_alignment)[activeIndex];
       text.classList.toggle('caption-active', activeLine !== null);
       text.querySelectorAll('[data-caption-line]').forEach((line) => line.classList.toggle('active', Number(line.dataset.captionLine) === activeLine));
@@ -521,7 +528,7 @@ async function transitionFocusEntry(entry, index, total) {
   const transcript = entry.text_body
     ? renderTimedText(entry, true).replace('media-transcript', 'media-transcript focus-transcript')
     : '<p class="focus-waiting">Transcript unavailable</p>';
-  if (entry.kind === 'video') {
+  if (['video', 'screen'].includes(entry.kind)) {
     focusContent.innerHTML = `<video class="focus-media" data-focus-media="${entry.id}" preload="auto" src="${escapeHTML(entry.media_url || '')}"></video>${transcript}`;
   } else {
     focusContent.innerHTML = `<div class="focus-audio-visual">${avatarMarkup(profile)}<span>${entry.kind === 'text' ? 'Written response' : 'Audio response'}</span></div>${transcript}<audio data-focus-media="${entry.id}" preload="auto" src="${escapeHTML(entry.media_url || '')}"></audio>`;
@@ -939,21 +946,52 @@ async function uploadConversationClip(file, forcedKind) {
   return entry;
 }
 
+async function createRecordingStream(kind) {
+  if (kind !== 'screen') {
+    const stream = await navigator.mediaDevices.getUserMedia(kind === 'video' ? { video: true, audio: true } : { audio: true });
+    dashboardState.recordingSourceStreams = [stream];
+    return stream;
+  }
+  if (!navigator.mediaDevices.getDisplayMedia) throw new Error('Screen recording is not supported in this browser.');
+  const displayStream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: { ideal: 30, max: 30 } }, audio: true });
+  let microphoneStream = null;
+  try { microphoneStream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
+  catch (error) { console.warn('Microphone was not included in screen recording', error); }
+  dashboardState.recordingSourceStreams = [displayStream, microphoneStream].filter(Boolean);
+  const finalStream = new MediaStream(displayStream.getVideoTracks());
+  const audioStreams = [displayStream, microphoneStream].filter((stream) => stream?.getAudioTracks().length);
+  if (audioStreams.length) {
+    const audioContext = new AudioContext();
+    const destination = audioContext.createMediaStreamDestination();
+    audioStreams.forEach((stream) => audioContext.createMediaStreamSource(stream).connect(destination));
+    destination.stream.getAudioTracks().forEach((track) => finalStream.addTrack(track));
+    dashboardState.recordingAudioContext = audioContext;
+  }
+  return finalStream;
+}
+
 async function startRecording(kind) {
   try {
-    const stream = await navigator.mediaDevices.getUserMedia(kind === 'video' ? { video: true, audio: true } : { audio: true });
+    const stream = await createRecordingStream(kind);
     dashboardState.recordingStream = stream;
     dashboardState.recordingChunks = [];
-    const recorder = new MediaRecorder(stream);
+    const preferredType = kind === 'audio' ? 'audio/webm;codecs=opus' : 'video/webm;codecs=vp9,opus';
+    const recorder = new MediaRecorder(stream, MediaRecorder.isTypeSupported(preferredType) ? { mimeType: preferredType } : undefined);
     dashboardState.recorder = recorder;
+    if (kind === 'screen') stream.getVideoTracks()[0]?.addEventListener('ended', () => { if (recorder.state !== 'inactive') recorder.stop(); });
     recorder.addEventListener('dataavailable', (event) => { if (event.data.size) dashboardState.recordingChunks.push(event.data); });
     recorder.addEventListener('stop', async () => {
       closeRecordingSectionDock();
       const recordedSections = dashboardState.recordingSections.map((section) => ({ ...section }));
       const blob = new Blob(dashboardState.recordingChunks, { type: recorder.mimeType || `${kind}/webm` });
+      dashboardState.recordingSourceStreams.forEach((source) => source.getTracks().forEach((track) => track.stop()));
       dashboardState.recordingStream?.getTracks().forEach((track) => track.stop());
+      await dashboardState.recordingAudioContext?.close().catch(() => {});
+      dashboardState.recordingAudioContext = null;
+      dashboardState.recordingSourceStreams = [];
       recordAudioButton.disabled = false;
       recordVideoButton.disabled = false;
+      recordScreenButton.disabled = false;
       stopRecordingButton.disabled = true;
       try {
         const entry = await uploadConversationClip(new File([blob], `${kind}-${Date.now()}.webm`, { type: blob.type }), kind);
@@ -967,8 +1005,11 @@ async function startRecording(kind) {
     if (currentParticipant?.role === 'host') openRecordingSectionDock();
     recordAudioButton.disabled = true;
     recordVideoButton.disabled = true;
+    recordScreenButton.disabled = true;
     stopRecordingButton.disabled = false;
-    workspaceMessage.textContent = `Recording ${kind}…`;
+    workspaceMessage.textContent = kind === 'screen'
+      ? 'Recording screen and microphone… Use the browser Share audio option to include tab or system sound.'
+      : `Recording ${kind}…`;
   } catch (error) {
     workspaceMessage.textContent = `Could not start recording: ${error.message}`;
   }
@@ -1240,6 +1281,7 @@ workspaceUpload.addEventListener('change', async () => {
 
 recordAudioButton.addEventListener('click', () => startRecording('audio'));
 recordVideoButton.addEventListener('click', () => startRecording('video'));
+recordScreenButton.addEventListener('click', () => startRecording('screen'));
 stopRecordingButton.addEventListener('click', () => dashboardState.recorder?.stop());
 recordingAgendaButtons.addEventListener('click', (event) => {
   const button = event.target.closest('[data-agenda-id]');
@@ -1342,6 +1384,10 @@ document.querySelector('#promptRecordAudio').addEventListener('click', () => {
 document.querySelector('#promptRecordVideo').addEventListener('click', () => {
   responsePromptDialog.close();
   startRecording('video');
+});
+document.querySelector('#promptRecordScreen').addEventListener('click', () => {
+  responsePromptDialog.close();
+  startRecording('screen');
 });
 document.querySelector('#promptUpload').addEventListener('click', () => {
   responsePromptDialog.close();
