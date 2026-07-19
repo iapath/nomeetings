@@ -166,9 +166,8 @@
         </section>
 
         <section class="workspace-section drop-files-section">
-          <div class="workspace-section-heading"><div><span class="section-kicker">Reference material</span><h3>Files</h3></div><span id="dropFileCount">0 files</span></div>
+          <div class="workspace-section-heading"><div><span class="section-kicker">Everything shared in this Drop</span><h3>File Drop</h3></div><span id="dropFileCount">0 files</span></div>
           <div class="drop-file-actions">
-            <label class="primary small upload-action">＋ Add file(s)<input id="dropFileInput" type="file" multiple /></label>
             <button class="ghost" id="downloadAllFilesButton" type="button">Download all</button>
           </div>
           <p class="form-message" id="dropFileMessage"></p>
@@ -197,6 +196,11 @@
           <div class="workspace-list entry-list" id="workspaceEntries"></div>
           <div class="response-composer">
             <span class="section-kicker">Your response</span>
+          <div class="message-file-picker">
+            <label class="ghost upload-action">＋ Add file(s)<input id="dropFileInput" type="file" multiple /></label>
+            <span>Attach documents to this response</span>
+          </div>
+          <div class="pending-file-list" id="pendingFileList"></div>
           <div class="response-actions">
             <label class="ghost upload-action">Upload video or audio<input id="workspaceUpload" type="file" accept="video/*,audio/*" /></label>
             <button class="ghost" id="recordAudioButton" type="button">Record audio</button>

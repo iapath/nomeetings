@@ -136,6 +136,14 @@ button:disabled { cursor:wait; opacity:.58; }
 @keyframes upload-sweep { from { transform:translateX(-110%); } to { transform:translateX(300%); } }
 .upload-action input { display:none; }
 .drop-file-actions { display:flex; flex-wrap:wrap; gap:9px; }
+.message-file-picker { display:flex; align-items:center; flex-wrap:wrap; gap:10px; margin:0 0 12px; }
+.message-file-picker > span { opacity:.58; font-size:.82rem; }
+.pending-file-list { display:flex; flex-wrap:wrap; gap:7px; margin-bottom:12px; }
+.pending-file-chip { display:flex; align-items:center; gap:7px; padding:7px 9px; border:1px solid rgba(226,63,83,.32); border-radius:999px; background:rgba(226,63,83,.1); font-size:.78rem; }
+.pending-file-chip button { border:0; padding:0; background:none; color:inherit; cursor:pointer; opacity:.65; }
+.entry-attachments { display:grid; gap:7px; margin-top:12px; }
+.entry-attachment { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:9px 11px; border-radius:12px; background:rgba(255,255,255,.055); }
+.entry-attachment a { font-size:.76rem; }
 .drop-file-list { display:grid; gap:8px; margin-top:14px; }
 .drop-file-row { display:grid; grid-template-columns:auto minmax(0,1fr) auto; align-items:center; gap:11px; padding:11px; border-radius:14px; background:rgba(127,127,127,.08); }
 .drop-file-icon { width:42px; height:42px; display:grid; place-items:center; border-radius:11px; background:rgba(226,63,83,.14); color:#ff93a0; font-size:.62rem; font-weight:900; }

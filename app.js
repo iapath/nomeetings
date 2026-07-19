@@ -115,6 +115,7 @@ const dropFileList = document.querySelector('#dropFileList');
 const dropFileCount = document.querySelector('#dropFileCount');
 const dropFileMessage = document.querySelector('#dropFileMessage');
 const downloadAllFilesButton = document.querySelector('#downloadAllFilesButton');
+const pendingFileList = document.querySelector('#pendingFileList');
 if (!navigator.mediaDevices?.getDisplayMedia) {
   recordScreenButton.hidden = true;
   document.querySelector('#promptRecordScreen').hidden = true;
@@ -149,6 +150,7 @@ const dashboardState = {
   teamMembers: [],
   teamInvites: [],
   dropFiles: [],
+  pendingFiles: [],
 };
 
 function escapeHTML(value = '') {
@@ -430,7 +432,7 @@ function renderConversationWorkspace() {
   workspaceEntries.innerHTML = dashboardState.entries.length ? dashboardState.entries.map((entry, index) => `
     <article class="workspace-row ${dashboardState.watchProgress.get(entry.id)?.completed ? 'watched' : ''}" data-entry-row="${entry.id}" style="--person-hue:${personHue(entry)}">
       <span class="entry-kind">${escapeHTML(entry.kind)}</span>
-      <div><div class="identity-line">${avatarMarkup(entry.profiles)}<h4>${escapeHTML(entry.profiles?.display_name || entry.profiles?.email || 'Participant')}</h4></div>${entry.kind === 'text' && entry.text_body ? renderTimedText(entry) : `<p>${entry.status === 'ready' ? 'Clip uploaded and ready.' : escapeHTML(entry.status)}</p>`}${entry.media_url ? `<${['video', 'screen'].includes(entry.kind) ? 'video' : 'audio'} class="entry-media" controls preload="auto" data-entry-media="${entry.id}" src="${escapeHTML(entry.media_url)}"></${['video', 'screen'].includes(entry.kind) ? 'video' : 'audio'}>` : entry.kind === 'text' ? `<div class="voice-missing"><button class="ghost" type="button" data-generate-voice="${entry.id}">Generate voice</button><span data-voice-error="${entry.id}">No saved audio yet.</span></div>` : ''}${entry.kind !== 'text' ? (entry.text_body ? renderTimedText(entry, true) : `<div class="voice-missing"><button class="ghost" type="button" data-transcribe-media="${entry.id}">Generate transcript</button><span data-transcript-error="${entry.id}">No transcript yet.</span></div>`) : ''}${renderSectionBadges(entry)}</div>
+      <div><div class="identity-line">${avatarMarkup(entry.profiles)}<h4>${escapeHTML(entry.profiles?.display_name || entry.profiles?.email || 'Participant')}</h4></div>${entry.kind === 'text' && entry.text_body ? renderTimedText(entry) : `<p>${entry.status === 'ready' ? 'Clip uploaded and ready.' : escapeHTML(entry.status)}</p>`}${entry.media_url ? `<${['video', 'screen'].includes(entry.kind) ? 'video' : 'audio'} class="entry-media" controls preload="auto" data-entry-media="${entry.id}" src="${escapeHTML(entry.media_url)}"></${['video', 'screen'].includes(entry.kind) ? 'video' : 'audio'}>` : entry.kind === 'text' ? `<div class="voice-missing"><button class="ghost" type="button" data-generate-voice="${entry.id}">Generate voice</button><span data-voice-error="${entry.id}">No saved audio yet.</span></div>` : ''}${entry.kind !== 'text' ? (entry.text_body ? renderTimedText(entry, true) : `<div class="voice-missing"><button class="ghost" type="button" data-transcribe-media="${entry.id}">Generate transcript</button><span data-transcript-error="${entry.id}">No transcript yet.</span></div>`) : ''}${renderEntryAttachments(entry)}${renderSectionBadges(entry)}</div>
       <div class="workspace-row-meta"><span class="watch-state">${dashboardState.watchProgress.get(entry.id)?.completed ? '✓ Played' : 'New'}</span><span>${escapeHTML(formatDate(entry.created_at))}</span><button class="ghost play-from-entry" type="button" data-play-index="${index}">Play from here</button></div>
     </article>`).join('') : '<div class="empty-inline">No responses yet. Upload a clip, record one, or write an update.</div>';
 
@@ -447,6 +449,12 @@ function renderConversationWorkspace() {
       if (!dashboardState.autoplayActive && participant?.role !== 'host' && entry?.author_id !== dashboardState.user.id) responsePromptDialog.showModal();
     });
   });
+}
+
+function renderEntryAttachments(entry) {
+  const files = dashboardState.dropFiles.filter((file) => file.entry_id === entry.id);
+  if (!files.length) return '';
+  return `<div class="entry-attachments">${files.map((file) => `<div class="entry-attachment"><span>📎 ${escapeHTML(file.file_name)} · ${formatFileSize(file.size_bytes)}</span><a class="ghost" href="${escapeHTML(file.signed_url || '#')}" target="_blank" rel="noopener" download="${escapeHTML(file.file_name)}">Download</a></div>`).join('')}</div>`;
 }
 
 function renderSectionBadges(entry) {
@@ -721,10 +729,14 @@ function renderDropFiles() {
     </article>`).join('') : '<div class="empty-inline">Add documents, spreadsheets, images, or other reference files for this Drop.</div>';
 }
 
+function renderPendingFiles() {
+  pendingFileList.innerHTML = dashboardState.pendingFiles.map((file, index) => `<span class="pending-file-chip">📎 ${escapeHTML(file.name)} <button type="button" data-remove-pending-file="${index}" aria-label="Remove ${escapeHTML(file.name)}">×</button></span>`).join('');
+}
+
 async function loadDropFiles() {
   const conversationId = dashboardState.currentConversation.id;
   const { data, error } = await supabase.from('drop_files')
-    .select('id,uploaded_by,storage_bucket,storage_path,file_name,content_type,size_bytes,created_at,profiles!drop_files_uploaded_by_fkey(email,display_name)')
+    .select('id,entry_id,uploaded_by,storage_bucket,storage_path,file_name,content_type,size_bytes,created_at,profiles!drop_files_uploaded_by_fkey(email,display_name)')
     .eq('conversation_id', conversationId).order('created_at');
   if (error) throw error;
   dashboardState.dropFiles = data || [];
@@ -735,7 +747,7 @@ async function loadDropFiles() {
   renderDropFiles();
 }
 
-async function uploadDropFile(file, index, total) {
+async function uploadDropFile(file, index, total, entryId = null) {
   const safeName = file.name.replace(/[^a-zA-Z0-9._-]+/g, '_');
   const path = `${dashboardState.currentConversation.id}/${dashboardState.user.id}/${crypto.randomUUID()}-${safeName}`;
   const { data: { session } } = await supabase.auth.getSession();
@@ -755,9 +767,17 @@ async function uploadDropFile(file, index, total) {
   const { error } = await supabase.from('drop_files').insert({
     conversation_id: dashboardState.currentConversation.id, uploaded_by: dashboardState.user.id,
     storage_bucket: 'drop-files', storage_path: path, file_name: file.name,
-    content_type: file.type || null, size_bytes: file.size,
+    entry_id: entryId, content_type: file.type || null, size_bytes: file.size,
   });
   if (error) { await supabase.storage.from('drop-files').remove([path]); throw error; }
+}
+
+async function uploadPendingFiles(entryId) {
+  const files = [...dashboardState.pendingFiles];
+  for (let index = 0; index < files.length; index += 1) await uploadDropFile(files[index], index, files.length, entryId);
+  dashboardState.pendingFiles = [];
+  dropFileInput.value = '';
+  renderPendingFiles();
 }
 
 function buildDropSummary() {
@@ -1039,6 +1059,7 @@ async function uploadConversationClip(file, forcedKind) {
     throw entryError;
   }
   await markEntryComplete(savedEntry);
+  if (dashboardState.pendingFiles.length) await uploadPendingFiles(savedEntry.id);
   await loadConversationWorkspace();
   setUploadProgress('Clip uploaded. Generating transcript…', 100);
   const entry = dashboardState.entries.find((item) => item.id === savedEntry.id);
@@ -1366,6 +1387,7 @@ textResponseForm.addEventListener('submit', async (event) => {
   if (error) workspaceMessage.textContent = `Could not post response: ${error.message}`;
   else {
     await markEntryComplete(savedEntry);
+    if (dashboardState.pendingFiles.length) await uploadPendingFiles(savedEntry.id);
     textResponseForm.reset();
     workspaceMessage.textContent = 'Response posted. Generating voice…';
     const { data: voiceData, error: voiceError } = await supabase.functions.invoke('generate-text-audio', { body: { entry_id: savedEntry.id } });
@@ -1386,17 +1408,15 @@ workspaceUpload.addEventListener('change', async () => {
 dropFileInput.addEventListener('change', async () => {
   const files = [...(dropFileInput.files || [])];
   if (!files.length) return;
-  dropFileInput.disabled = true;
-  try {
-    for (let index = 0; index < files.length; index += 1) await uploadDropFile(files[index], index, files.length);
-    await loadDropFiles();
-    dropFileMessage.textContent = `${files.length} file${files.length === 1 ? '' : 's'} added to this Drop.`;
-  } catch (error) {
-    dropFileMessage.textContent = `Could not add files: ${error.message}`;
-  } finally {
-    dropFileInput.value = '';
-    dropFileInput.disabled = false;
-  }
+  dashboardState.pendingFiles.push(...files);
+  renderPendingFiles();
+  workspaceMessage.textContent = `${files.length} file${files.length === 1 ? '' : 's'} ready to attach to your next response.`;
+});
+pendingFileList.addEventListener('click', (event) => {
+  const button = event.target.closest('[data-remove-pending-file]');
+  if (!button) return;
+  dashboardState.pendingFiles.splice(Number(button.dataset.removePendingFile), 1);
+  renderPendingFiles();
 });
 downloadAllFilesButton.addEventListener('click', downloadAllDropFiles);
 
