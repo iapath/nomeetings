@@ -3,6 +3,7 @@ import * as tus from 'https://esm.sh/tus-js-client@4.3.1/lib.esm/browser/index.j
 import JSZip from 'https://esm.sh/jszip@3.10.1';
 
 const SUPABASE_URL = 'https://kepkisctnlomykhyqywh.supabase.co';
+const AUTH_REDIRECT_URL = 'https://www.nomeetings.ai/';
 const DROP_FILE_MAX_BYTES = 100 * 1024 * 1024;
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtlcGtpc2N0bmxvbXlraHlxeXdoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQyMDQ1NjUsImV4cCI6MjA5OTc4MDU2NX0.4RbX_nDxQDQHZ-vkNvvAtdv0TkWr_km51YnTFPGIV20';
 const hasSupabaseConfig = !SUPABASE_ANON_KEY.startsWith('REPLACE_');
@@ -1213,7 +1214,7 @@ emailForm.addEventListener('submit', async (event) => {
   try {
     const { error } = await supabase.auth.signInWithOtp({
       email,
-      options: { emailRedirectTo: `${window.location.origin}/` },
+      options: { emailRedirectTo: AUTH_REDIRECT_URL },
     });
     statusLine.textContent = error
       ? `Could not send the magic link: ${error.message}`
@@ -1296,7 +1297,7 @@ teamInviteButton.addEventListener('click', async () => {
   teamMessage.textContent = `Inviting ${email}…`;
   try {
     const { error: emailError } = await supabase.auth.signInWithOtp({
-      email, options: { shouldCreateUser: true, emailRedirectTo: `${window.location.origin}/` },
+      email, options: { shouldCreateUser: true, emailRedirectTo: AUTH_REDIRECT_URL },
     });
     const { error } = await supabase.rpc('invite_team_member', { target_workspace_id: dashboardState.workspace.workspace_id, target_email: email });
     if (error) throw error;
@@ -1365,7 +1366,7 @@ inviteForm.addEventListener('submit', async (event) => {
 
   const { error: emailError } = await supabase.auth.signInWithOtp({
     email,
-    options: { shouldCreateUser: true, emailRedirectTo: `${window.location.origin}/` },
+    options: { shouldCreateUser: true, emailRedirectTo: AUTH_REDIRECT_URL },
   });
   inviteForm.reset();
   document.querySelector('#inviteResponseRequired').checked = true;
