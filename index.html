@@ -8,7 +8,25 @@
 </head>
 <body>
   <main class="app dark" id="app">
-    <div id="landingView">
+    <section class="auth-page" id="authView">
+      <nav class="auth-nav"><div class="brand"><div class="ban-logo"><span></span></div><strong>NoMeetings</strong></div><button class="toggle" id="authThemeToggle" type="button">Light mode</button></nav>
+      <div class="auth-shell">
+        <div class="auth-pitch"><p class="eyebrow">Welcome back</p><h1>Drop the update.<br><span>Skip the meeting.</span></h1><p class="lede">Sign in to create, watch, and respond to your team's Drops.</p></div>
+        <div class="login-card">
+          <div class="auth-mode-tabs"><button class="active" id="signInMode" type="button">Sign in</button><button id="signUpMode" type="button">Create account</button></div>
+          <h2 id="loginHeading">Sign in to NoMeetings</h2>
+          <form id="passwordAuthForm">
+            <label>Email<input id="loginEmail" type="email" autocomplete="email" placeholder="you@company.com" required></label>
+            <label>Password<input id="loginPassword" type="password" autocomplete="current-password" minlength="6" placeholder="Your password" required></label>
+            <button class="primary" id="passwordAuthSubmit" type="submit">Sign in</button>
+          </form>
+          <button class="text-button" id="forgotPasswordButton" type="button">Forgot your password?</button>
+          <p class="auth-message" id="loginMessage" aria-live="polite"></p>
+          <details class="magic-link-option"><summary>Sign in with a magic link instead</summary><form id="emailForm"><input id="emailInput" type="email" placeholder="you@company.com" autocomplete="email" required><button id="emailSubmit" class="ghost" type="submit">Send magic link</button></form></details>
+        </div>
+      </div>
+    </section>
+    <div id="landingView" hidden>
     <nav class="nav">
       <div class="brand"><div class="ban-logo"><span></span></div><strong>NoMeetings</strong></div>
       <div class="nav-actions">
@@ -68,13 +86,20 @@
         <ul><li>Judy — Q4 Predictions</li><li>John — Monthly Numbers</li><li>Kate — Launch Tasks optional</li></ul>
         <h3>Email reminders</h3>
         <p>Due Friday 5:00 PM. Reminders queued for 8h, 3h, and 1h before deadline.</p>
-        <div class="auth-panel" id="authPanel">
-          <h3>Supabase Auth</h3>
-          <form id="emailForm"><input id="emailInput" type="email" placeholder="you@company.com" autocomplete="email" required /><button id="emailSubmit" class="primary small" type="submit">Send magic link</button></form>
-        </div>
+        <div class="auth-panel" id="authPanel"><h3>Your team's async workspace</h3><p>Sign in to open your Drops.</p></div>
       </aside>
     </section>
+
     </div>
+
+    <dialog class="conversation-dialog password-reset-dialog" id="passwordResetDialog">
+      <form id="passwordResetForm">
+        <div class="dialog-heading"><div><p class="eyebrow">Account recovery</p><h2>Choose a new password</h2></div></div>
+        <label>New password<input id="newPassword" type="password" minlength="6" autocomplete="new-password" required></label>
+        <p class="form-message" id="passwordResetMessage"></p>
+        <button class="primary" type="submit">Save new password</button>
+      </form>
+    </dialog>
 
     <section class="dashboard" id="dashboardView" hidden>
       <nav class="dashboard-nav">

@@ -46,6 +46,20 @@ const markerLog = document.querySelector('#markerLog');
 const responseButtons = document.querySelectorAll('[data-response-type]');
 const uploadInput = document.querySelector('#uploadInput');
 const landingView = document.querySelector('#landingView');
+const authView = document.querySelector('#authView');
+const authThemeToggle = document.querySelector('#authThemeToggle');
+const passwordAuthForm = document.querySelector('#passwordAuthForm');
+const loginEmail = document.querySelector('#loginEmail');
+const loginPassword = document.querySelector('#loginPassword');
+const passwordAuthSubmit = document.querySelector('#passwordAuthSubmit');
+const loginMessage = document.querySelector('#loginMessage');
+const loginHeading = document.querySelector('#loginHeading');
+const signInMode = document.querySelector('#signInMode');
+const signUpMode = document.querySelector('#signUpMode');
+const forgotPasswordButton = document.querySelector('#forgotPasswordButton');
+const passwordResetDialog = document.querySelector('#passwordResetDialog');
+const passwordResetForm = document.querySelector('#passwordResetForm');
+const passwordResetMessage = document.querySelector('#passwordResetMessage');
 const dashboardView = document.querySelector('#dashboardView');
 const dashboardUser = document.querySelector('#dashboardUser');
 const dashboardEmail = document.querySelector('#dashboardEmail');
@@ -154,6 +168,7 @@ const dashboardState = {
   dropFiles: [],
   pendingFiles: [],
 };
+let authMode = 'signin';
 
 function escapeHTML(value = '') {
   return String(value).replace(/[&<>'"]/g, (character) => ({
@@ -257,7 +272,8 @@ function clearUploadProgress() {
 }
 
 function setView(isSignedIn) {
-  landingView.hidden = isSignedIn;
+  authView.hidden = isSignedIn;
+  landingView.hidden = true;
   dashboardView.hidden = !isSignedIn;
 }
 
@@ -288,6 +304,7 @@ function setTheme(isDark) {
   app.classList.toggle('dark', isDark);
   app.classList.toggle('light', !isDark);
   themeToggle.textContent = isDark ? 'Light mode' : 'Dark mode';
+  if (authThemeToggle) authThemeToggle.textContent = isDark ? 'Light mode' : 'Dark mode';
   if (dashboardThemeToggle) dashboardThemeToggle.textContent = isDark ? 'Light mode' : 'Dark mode';
   localStorage.setItem('nomeetings-theme', isDark ? 'dark' : 'light');
 }
@@ -1194,16 +1211,84 @@ uploadInput.addEventListener('change', () => {
   statusLine.textContent = `Ready to upload ${file.name} (${Math.round(file.size / 1024 / 1024)} MB) to conversation-clips.`;
 });
 
+function setAuthMode(mode) {
+  authMode = mode;
+  const signingUp = mode === 'signup';
+  signInMode.classList.toggle('active', !signingUp);
+  signUpMode.classList.toggle('active', signingUp);
+  loginHeading.textContent = signingUp ? 'Create your account' : 'Sign in to NoMeetings';
+  passwordAuthSubmit.textContent = signingUp ? 'Create account' : 'Sign in';
+  loginPassword.autocomplete = signingUp ? 'new-password' : 'current-password';
+  forgotPasswordButton.hidden = signingUp;
+  loginMessage.textContent = '';
+}
+
+signInMode.addEventListener('click', () => setAuthMode('signin'));
+signUpMode.addEventListener('click', () => setAuthMode('signup'));
+authThemeToggle.addEventListener('click', () => setTheme(!app.classList.contains('dark')));
+
+passwordAuthForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  if (!passwordAuthForm.reportValidity() || !supabase) return;
+  passwordAuthSubmit.disabled = true;
+  loginMessage.textContent = authMode === 'signup' ? 'Creating your account…' : 'Signing you in…';
+  try {
+    const credentials = { email: loginEmail.value.trim(), password: loginPassword.value };
+    const { data, error } = authMode === 'signup'
+      ? await supabase.auth.signUp({ ...credentials, options: { emailRedirectTo: AUTH_REDIRECT_URL } })
+      : await supabase.auth.signInWithPassword(credentials);
+    if (error) throw error;
+    if (authMode === 'signup' && !data.session) {
+      loginMessage.textContent = 'Account created. Check your email once to confirm it, then sign in with your password.';
+      return;
+    }
+    loginMessage.textContent = 'Signed in. Opening your Drops…';
+  } catch (error) {
+    loginMessage.textContent = error.message.includes('Invalid login credentials')
+      ? 'That email/password combination did not work. If you previously used magic links, choose Forgot your password to create a password.'
+      : error.message;
+  } finally {
+    passwordAuthSubmit.disabled = false;
+    passwordAuthSubmit.textContent = authMode === 'signup' ? 'Create account' : 'Sign in';
+  }
+});
+
+forgotPasswordButton.addEventListener('click', async () => {
+  const email = loginEmail.value.trim();
+  if (!email || !loginEmail.checkValidity()) {
+    loginEmail.reportValidity();
+    loginMessage.textContent = 'Enter your email first, then choose Forgot your password.';
+    return;
+  }
+  forgotPasswordButton.disabled = true;
+  loginMessage.textContent = 'Sending password reset instructions…';
+  const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: AUTH_REDIRECT_URL });
+  loginMessage.textContent = error ? error.message : `Password reset sent to ${email}.`;
+  forgotPasswordButton.disabled = false;
+});
+
+passwordResetForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  if (!passwordResetForm.reportValidity()) return;
+  passwordResetMessage.textContent = 'Saving your new password…';
+  const { error } = await supabase.auth.updateUser({ password: document.querySelector('#newPassword').value });
+  if (error) passwordResetMessage.textContent = error.message;
+  else {
+    passwordResetMessage.textContent = 'Password saved.';
+    setTimeout(() => passwordResetDialog.close(), 500);
+  }
+});
+
 emailForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   if (!supabase) {
-    statusLine.textContent = 'Demo mode: Supabase auth is not connected in this checkout.';
+    loginMessage.textContent = 'Supabase authentication is not connected.';
     return;
   }
   const email = emailInput.value.trim();
   if (!email || !emailInput.checkValidity()) {
     emailInput.reportValidity();
-    statusLine.textContent = 'Enter a valid email address to receive your magic link.';
+    loginMessage.textContent = 'Enter a valid email address to receive your magic link.';
     return;
   }
 
@@ -1211,16 +1296,17 @@ emailForm.addEventListener('submit', async (event) => {
   emailSubmit.textContent = 'Sending…';
   statusLine.textContent = `Sending a magic link to ${email}…`;
 
+  loginMessage.textContent = `Sending a magic link to ${email}…`;
   try {
     const { error } = await supabase.auth.signInWithOtp({
       email,
       options: { emailRedirectTo: AUTH_REDIRECT_URL },
     });
-    statusLine.textContent = error
+    loginMessage.textContent = error
       ? `Could not send the magic link: ${error.message}`
       : `Magic link sent to ${email}. Check your inbox and spam folder.`;
   } catch (error) {
-    statusLine.textContent = `Could not contact Supabase: ${error.message}`;
+    loginMessage.textContent = `Could not contact Supabase: ${error.message}`;
   } finally {
     emailSubmit.disabled = false;
     emailSubmit.textContent = 'Send magic link';
@@ -1613,6 +1699,11 @@ conversationForm.addEventListener('submit', async (event) => {
 
 if (supabase) {
   supabase.auth.onAuthStateChange((event, session) => {
+    if (event === 'PASSWORD_RECOVERY') {
+      passwordResetMessage.textContent = '';
+      document.querySelector('#newPassword').value = '';
+      passwordResetDialog.showModal();
+    }
     if (event === 'SIGNED_IN' && session?.user && session.user.id !== dashboardState.user?.id) {
       setView(true);
       loadDashboard(session.user).catch((error) => console.error('Could not load dashboard', error));

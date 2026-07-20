@@ -48,6 +48,25 @@ ul { padding-left:18px; line-height:1.8; }
 .marker-log { list-style:none; padding:0; margin:14px 0 0; font-size:.9rem; }
 .marker-log li { padding:9px 0; border-top:1px solid rgba(127,127,127,.14); }
 .auth-panel { margin-top:20px; padding-top:16px; border-top:1px solid rgba(127,127,127,.18); }
+.auth-page { max-width:1280px; min-height:calc(100vh - 56px); margin:0 auto; display:grid; grid-template-rows:auto 1fr; }
+.auth-nav { display:flex; align-items:center; justify-content:space-between; }
+.auth-shell { display:grid; grid-template-columns:minmax(0,1.2fr) minmax(340px,480px); gap:64px; align-items:center; padding:64px 0; }
+.auth-pitch h1 { font-size:clamp(3.5rem,7vw,7rem); }
+.login-card { padding:34px; border:1px solid rgba(127,127,127,.24); border-radius:30px; background:linear-gradient(180deg,rgba(255,255,255,.11),rgba(255,255,255,.045)); box-shadow:0 24px 80px rgba(0,0,0,.28); }
+.login-card h2 { margin:24px 0; font-size:1.75rem; letter-spacing:-.04em; }
+.auth-mode-tabs { display:grid; grid-template-columns:1fr 1fr; gap:6px; padding:5px; border-radius:999px; background:rgba(127,127,127,.12); }
+.auth-mode-tabs button { border:0; border-radius:999px; padding:10px; color:inherit; background:transparent; }
+.auth-mode-tabs button.active { background:var(--red); color:white; }
+#passwordAuthForm { display:grid; gap:16px; }
+#passwordAuthForm label,.password-reset-dialog label { display:grid; gap:7px; font-weight:700; font-size:.86rem; }
+#passwordAuthForm input,.password-reset-dialog input { width:100%; border:1px solid rgba(127,127,127,.26); border-radius:14px; padding:13px 14px; background:rgba(255,255,255,.07); color:inherit; font:inherit; }
+.text-button { display:block; margin:14px auto 0; border:0; background:none; color:inherit; opacity:.7; text-decoration:underline; }
+.auth-message { min-height:24px; color:#ff8090; line-height:1.45; }
+.magic-link-option { margin-top:18px; padding-top:18px; border-top:1px solid rgba(127,127,127,.18); }
+.magic-link-option summary { cursor:pointer; opacity:.68; font-size:.86rem; }
+.magic-link-option form { display:grid; gap:9px; margin-top:12px; }
+.magic-link-option input { width:100%; border:1px solid rgba(127,127,127,.26); border-radius:14px; padding:12px; background:rgba(255,255,255,.07); color:inherit; }
+@media (max-width:850px) { .auth-shell { grid-template-columns:1fr; gap:30px; padding:40px 0; } .auth-pitch h1 { font-size:clamp(3.2rem,14vw,5.5rem); } }
 @media (max-width:640px) { .marker-form { grid-template-columns:1fr; } }
 
 [hidden] { display:none !important; }
