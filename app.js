@@ -3,6 +3,7 @@ import * as tus from 'https://esm.sh/tus-js-client@4.3.1/lib.esm/browser/index.j
 import JSZip from 'https://esm.sh/jszip@3.10.1';
 
 const SUPABASE_URL = 'https://kepkisctnlomykhyqywh.supabase.co';
+const DROP_FILE_MAX_BYTES = 100 * 1024 * 1024;
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtlcGtpc2N0bmxvbXlraHlxeXdoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQyMDQ1NjUsImV4cCI6MjA5OTc4MDU2NX0.4RbX_nDxQDQHZ-vkNvvAtdv0TkWr_km51YnTFPGIV20';
 const hasSupabaseConfig = !SUPABASE_ANON_KEY.startsWith('REPLACE_');
 const supabase = hasSupabaseConfig ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
@@ -748,6 +749,7 @@ async function loadDropFiles() {
 }
 
 async function uploadDropFile(file, index, total, entryId = null) {
+  if (file.size > DROP_FILE_MAX_BYTES) throw new Error(`${file.name} is larger than 100 MB. Share it as a link instead.`);
   const safeName = file.name.replace(/[^a-zA-Z0-9._-]+/g, '_');
   const path = `${dashboardState.currentConversation.id}/${dashboardState.user.id}/${crypto.randomUUID()}-${safeName}`;
   const { data: { session } } = await supabase.auth.getSession();
@@ -1408,6 +1410,12 @@ workspaceUpload.addEventListener('change', async () => {
 dropFileInput.addEventListener('change', async () => {
   const files = [...(dropFileInput.files || [])];
   if (!files.length) return;
+  const oversized = files.filter((file) => file.size > DROP_FILE_MAX_BYTES);
+  if (oversized.length) {
+    dropFileInput.value = '';
+    workspaceMessage.textContent = `${oversized.map((file) => file.name).join(', ')} ${oversized.length === 1 ? 'is' : 'are'} over 100 MB. Paste a shared-storage link in your response instead.`;
+    return;
+  }
   dashboardState.pendingFiles.push(...files);
   renderPendingFiles();
   workspaceMessage.textContent = `${files.length} file${files.length === 1 ? '' : 's'} ready to attach to your next response.`;
